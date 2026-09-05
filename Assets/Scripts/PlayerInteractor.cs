@@ -1,8 +1,12 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
 /// The player's single point of contact with the world: looks down the camera,
-/// picks the one thing in reach, shows its prompt, and routes the key press to it.
+/// picks the one thing in reach, lists what can be done to it, and routes the key.
+///
+/// Key bindings live on the interactables (a door says E, a pickup says F), so a new
+/// object cannot silently steal a key that something else already uses.
 ///
 /// Co-op note: this is per-player and local. It only ever asks an interactable to
 /// act; the interactable owns whatever shared state changes as a result.
@@ -15,16 +19,16 @@ public class PlayerInteractor : MonoBehaviour
     public float range = 3.5f;
 
     [Header("Keys")]
-    public KeyCode interactKey = KeyCode.E;
-    public KeyCode dropKey = KeyCode.G;
+    [Tooltip("Drops whatever is being carried. Every other key is declared by the interactable itself.")]
+    public KeyCode dropKey = KeyCode.Q;
 
     [Header("Carrying")]
     [Tooltip("Where a carried item is parented. Usually a child of the camera.")]
     public Transform carrySocket;
 
+    private readonly List<InteractionOption> options = new List<InteractionOption>();
     private Carryable carried;
     private IInteractable target;
-    private string prompt;
 
     public Carryable Carried { get { return carried; } }
     public bool IsCarrying { get { return carried != null; } }
@@ -52,9 +56,16 @@ public class PlayerInteractor : MonoBehaviour
     {
         AcquireTarget();
 
-        if (target != null && !string.IsNullOrEmpty(prompt) && Input.GetKeyDown(interactKey))
+        if (target != null)
         {
-            target.Interact(this);
+            for (int i = 0; i < options.Count; i++)
+            {
+                if (Input.GetKeyDown(options[i].key))
+                {
+                    target.Interact(this, options[i].key);
+                    break;
+                }
+            }
         }
 
         if (carried != null && Input.GetKeyDown(dropKey))
@@ -66,7 +77,7 @@ public class PlayerInteractor : MonoBehaviour
     private void AcquireTarget()
     {
         target = null;
-        prompt = null;
+        options.Clear();
 
         if (viewCamera == null) return;
 
@@ -80,11 +91,10 @@ public class PlayerInteractor : MonoBehaviour
         IInteractable candidate = hit.collider.GetComponentInParent<IInteractable>();
         if (candidate == null) return;
 
-        string p = candidate.GetPrompt(this);
-        if (string.IsNullOrEmpty(p)) return;
+        candidate.GetOptions(this, options);
+        if (options.Count == 0) return;
 
         target = candidate;
-        prompt = p;
     }
 
     /// <summary>Take an item into the hands. Anything already held is dropped first.</summary>
@@ -123,17 +133,22 @@ public class PlayerInteractor : MonoBehaviour
     void OnGUI()
     {
         // Crosshair, so the player knows the interaction is aim-based.
-        GUI.Label(new Rect(Screen.width / 2f - 4f, Screen.height / 2f - 10f, 20f, 20f), "+");
+        Hud.Label(new Rect(0f, Screen.height * 0.5f - Hud.Prompt.fontSize * 0.5f, Screen.width, Hud.Prompt.fontSize),
+                  "+", Hud.Centered, new Color(1f, 1f, 1f, 0.75f));
 
-        if (!string.IsNullOrEmpty(prompt))
+        // Every available action, one per line, each showing its own key.
+        for (int i = 0; i < options.Count; i++)
         {
-            GUI.Label(new Rect(Screen.width / 2f - 100f, Screen.height / 2f + 30f, 300f, 24f), prompt);
+            float y = Screen.height * 0.5f + Hud.Prompt.fontSize * (0.9f + i * 1.3f);
+            Hud.Label(new Rect(0f, y, Screen.width, Hud.Prompt.fontSize * 1.6f),
+                      "[" + options[i].key + "]  " + options[i].label, Hud.Prompt);
         }
 
         if (carried != null)
         {
-            GUI.Label(new Rect(12f, Screen.height - 30f, 400f, 24f),
-                      "Carrying: " + carried.itemName + "   (" + dropKey + " to drop)");
+            Hud.Label(new Rect(14f, Screen.height - Hud.LineHeight - 12f, 700f, Hud.LineHeight),
+                      "Carrying: " + carried.itemName + "   [" + dropKey + "] drop",
+                      Hud.Readout, new Color(1f, 0.92f, 0.6f));
         }
     }
 }

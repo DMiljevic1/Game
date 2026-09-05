@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+
 /// <summary>
 /// Keeps monsters out of a radius while it is running, and burns fuel to do it.
 /// The whole night loop hangs off this: fuel is finite, so "how far do we explore?"
@@ -26,6 +27,10 @@ public class Generator : MonoBehaviour, IInteractable
     [Header("Protection")]
     [Tooltip("Monsters will not enter this radius while the generator runs.")]
     public float protectionRadius = 22f;
+
+    [Header("Keys")]
+    public KeyCode powerKey = KeyCode.T;
+    public KeyCode refuelKey = KeyCode.F;
 
     [Header("Powered by this generator")]
     [Tooltip("Lights switched on while running. Makes protection visible at a glance.")]
@@ -54,14 +59,23 @@ public class Generator : MonoBehaviour, IInteractable
     /// <summary>True if any running generator covers this point.</summary>
     public static bool IsPointProtected(Vector3 point)
     {
+        return GetProtector(point) != null;
+    }
+
+    /// <summary>
+    /// The running generator covering this point, or null. Monsters use it to find
+    /// the edge of the safe zone so they can gather at it instead of walking in.
+    /// </summary>
+    public static Generator GetProtector(Vector3 point)
+    {
         for (int i = 0; i < active.Count; i++)
         {
             Generator g = active[i];
             if (g == null || !g.isRunning) continue;
             if ((point - g.transform.position).sqrMagnitude <= g.protectionRadius * g.protectionRadius)
-                return true;
+                return g;
         }
-        return false;
+        return null;
     }
 
     void OnEnable() { active.Add(this); }
@@ -77,28 +91,31 @@ public class Generator : MonoBehaviour, IInteractable
         if (HasAuthority) TickFuel();
     }
 
-    public string GetPrompt(PlayerInteractor interactor)
+    public void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
+        // Refuelling and switching on are separate keys, so you can do both without
+        // putting the can down.
         FuelCan can = interactor.GetCarried<FuelCan>();
-        if (can != null && !can.IsEmpty)
+        if (can != null && !can.IsEmpty && fuel < fuelCapacity)
         {
-            return fuel >= fuelCapacity ? "Tank is full" : "Press E to refuel";
+            options.Add(new InteractionOption(refuelKey, string.Format("Refuel ({0:0} in can)", can.fuel)));
         }
 
-        if (isRunning) return "Press E to switch off";
-        return HasFuel ? "Press E to start" : "Out of fuel";
+        if (isRunning) options.Add(new InteractionOption(powerKey, "Switch off generator"));
+        else if (HasFuel) options.Add(new InteractionOption(powerKey, "Start generator"));
+        else options.Add(new InteractionOption(powerKey, "Out of fuel"));
     }
 
-    public void Interact(PlayerInteractor interactor)
+    public void Interact(PlayerInteractor interactor, KeyCode key)
     {
-        // Pouring takes priority: if you walked here holding a can, that is why.
-        FuelCan can = interactor.GetCarried<FuelCan>();
-        if (can != null && !can.IsEmpty)
+        if (key == refuelKey)
         {
-            if (fuel >= fuelCapacity) return;
-            can.PourInto(this);
+            FuelCan can = interactor.GetCarried<FuelCan>();
+            if (can != null && !can.IsEmpty && fuel < fuelCapacity) can.PourInto(this);
             return;
         }
+
+        if (key != powerKey) return;
 
         if (isRunning) Stop();
         else Start_();
@@ -180,9 +197,14 @@ public class Generator : MonoBehaviour, IInteractable
     {
         // Temporary readout until there is real UI.
         string state = isRunning ? "RUNNING" : (HasFuel ? "OFF" : "OUT OF FUEL");
-        GUI.Label(new Rect(12f, 52f, 420f, 22f),
-                  string.Format("Generator: {0}   fuel {1:0}/{2:0}   ({3:0}s left)",
-                                state, fuel, fuelCapacity, SecondsOfFuelLeft));
+
+        Color tint = Color.white;
+        if (!HasFuel) tint = new Color(1f, 0.35f, 0.35f);
+        else if (fuel <= lowFuelThreshold) tint = new Color(1f, 0.72f, 0.30f);
+        else if (isRunning) tint = new Color(0.6f, 1f, 0.65f);
+
+        Hud.Row(2, string.Format("Generator: {0}   fuel {1:0}/{2:0}   ({3:0}s left)",
+                                 state, fuel, fuelCapacity, SecondsOfFuelLeft), tint);
     }
 
     void OnDrawGizmosSelected()

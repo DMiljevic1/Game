@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -21,12 +22,13 @@ public class FuelCan : Carryable
         if (string.IsNullOrEmpty(itemName) || itemName == "Item") itemName = "fuel can";
     }
 
-    public override string GetPrompt(PlayerInteractor interactor)
+    public override void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
-        if (IsHeld) return null;
-        return IsEmpty
-            ? "Press E to pick up empty can"
-            : string.Format("Press E to pick up {0} ({1:0} fuel)", itemName, fuel);
+        if (IsHeld) return;
+
+        options.Add(new InteractionOption(pickUpKey, IsEmpty
+            ? "Pick up empty can"
+            : string.Format("Pick up {0} ({1:0} fuel)", itemName, fuel)));
     }
 
     /// <summary>Pour everything into a generator. Returns how much was actually accepted.</summary>

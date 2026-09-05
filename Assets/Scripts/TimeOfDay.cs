@@ -238,11 +238,21 @@ public class TimeOfDay : MonoBehaviour
         string line = string.Format("Day {0}   {1:00}:{2:00}   {3}   next in {4:0}s",
                                     dayNumber, h, m, phase.ToString().ToUpper(), TimeUntilPhaseEnd);
 
-        GUI.Label(new Rect(12f, 10f, 420f, 22f), line);
+        // Colour the clock by phase: the HUD should read at a glance in a panic.
+        Color tint;
+        switch (phase)
+        {
+            case DayPhase.Dusk: tint = new Color(1f, 0.70f, 0.35f); break;
+            case DayPhase.Night: tint = new Color(1f, 0.45f, 0.45f); break;
+            case DayPhase.Dawn: tint = new Color(0.75f, 0.85f, 1f); break;
+            default: tint = Color.white; break;
+        }
+
+        Hud.Row(0, line, tint);
         if (timeScale != 1f || paused)
         {
-            GUI.Label(new Rect(12f, 30f, 420f, 22f),
-                      paused ? "clock PAUSED" : string.Format("clock x{0}", timeScale));
+            Hud.Row(1, paused ? "clock PAUSED" : string.Format("clock x{0}", timeScale),
+                    new Color(0.7f, 0.9f, 1f));
         }
     }
 }

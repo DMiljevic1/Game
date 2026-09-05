@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 // Put this on the door's HINGE pivot (an empty GameObject positioned at the
@@ -5,9 +6,13 @@ using UnityEngine;
 // Targeting and the interact key are handled by PlayerInteractor.
 public class DoorInteraction : MonoBehaviour, IInteractable
 {
+    public KeyCode useKey = KeyCode.E;
     public float openAngle = 90f; // always swings this direction (positive = one fixed side)
     public float openSpeed = 3f;
     public float restAngleThreshold = 2f; // degrees; below this the door counts as "settled"
+
+    [Tooltip("Can a monster force this open? Clear it for a door that should stay shut.")]
+    public bool canBeForced = true;
 
     private Quaternion closedRotation;
     private Quaternion openRotation;
@@ -28,14 +33,23 @@ public class DoorInteraction : MonoBehaviour, IInteractable
         }
     }
 
-    public string GetPrompt(PlayerInteractor interactor)
+    public void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
-        return isOpen ? "Press E to close" : "Press E to open";
+        options.Add(new InteractionOption(useKey, isOpen ? "Close door" : "Open door"));
     }
 
-    public void Interact(PlayerInteractor interactor)
+    public void Interact(PlayerInteractor interactor, KeyCode key)
     {
+        if (key != useKey) return;
         isOpen = !isOpen;
+    }
+
+    public bool IsOpen { get { return isOpen; } }
+
+    /// <summary>Open or close from code — used by monsters forcing their way in.</summary>
+    public void SetOpen(bool open)
+    {
+        isOpen = open;
     }
 
     void Update()

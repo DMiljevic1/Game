@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -8,6 +9,9 @@ using UnityEngine;
 public class Carryable : MonoBehaviour, IInteractable
 {
     public string itemName = "Item";
+
+    [Tooltip("Key used to pick this up.")]
+    public KeyCode pickUpKey = KeyCode.F;
 
     [Tooltip("Local offset and rotation while held, relative to the carry socket.")]
     public Vector3 heldPosition = Vector3.zero;
@@ -30,15 +34,15 @@ public class Carryable : MonoBehaviour, IInteractable
         }
     }
 
-    public virtual string GetPrompt(PlayerInteractor interactor)
-    {
-        if (held) return null;
-        return "Press E to pick up " + itemName;
-    }
-
-    public virtual void Interact(PlayerInteractor interactor)
+    public virtual void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
         if (held) return;
+        options.Add(new InteractionOption(pickUpKey, "Pick up " + itemName));
+    }
+
+    public virtual void Interact(PlayerInteractor interactor, KeyCode key)
+    {
+        if (held || key != pickUpKey) return;
         interactor.Carry(this);
     }
 

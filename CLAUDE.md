@@ -85,15 +85,26 @@ keeps its own timer.
 - Note: the static registry is filled in `OnEnable`, which does not run in edit mode. Editor-time
   calls to `IsPointProtected` return false — verify radii geometrically in tooling, not via that call.
 
-### Interaction — one router, never a second E handler
+### Interaction — one router, never a second key handler
 
-`PlayerInteractor` on the Player raycasts from the camera, picks **one** target per frame, shows its
-prompt, and dispatches the key. **Never** add proximity checks or `Input.GetKeyDown(E)` to a new
-object — implement `IInteractable` instead, or two things will fire at once.
+`PlayerInteractor` on the Player raycasts from the camera, picks **one** target per frame, lists what
+can be done to it, and dispatches the key. **Never** add proximity checks or `Input.GetKeyDown` to a
+new object — implement `IInteractable` instead, or two things will fire at once.
 
-- `GetPrompt(interactor)` returns the label, or null/empty to refuse interaction entirely.
+**Key map (the interactable declares its own key, so nothing can silently steal one):**
+
+| Key | Action | Declared by |
+|---|---|---|
+| **E** | open / close doors | `DoorInteraction.useKey` |
+| **F** | pick up an item, and pour fuel in | `Carryable.pickUpKey`, `Generator.refuelKey` |
+| **Q** | drop what you are holding | `PlayerInteractor.dropKey` |
+| **T** | start / stop the generator | `Generator.powerKey` |
+
+- `GetOptions` fills a list, so one object can offer several actions at once — the generator offers
+  refuel (F) and start (T) together, so you never have to put the can down to switch it on.
+- Add nothing to the list to refuse interaction entirely.
 - Ask what the player is holding with `interactor.GetCarried<T>()`; that is how the generator knows
-  to offer "refuel" instead of "start".
+  whether to offer refuel at all.
 - Carryables (`Carryable`, `FuelCan`) disable their colliders while held so they neither shove the
   player nor block the interaction ray. Drop with G.
 - Anything interactable needs a collider, and colliders must be enabled to be looked at — doors are
@@ -104,6 +115,37 @@ object — implement `IInteractable` instead, or two things will fire at once.
 Generator tank 100. A full night costs **75** fuel. A can holds **40**. So one can buys roughly half
 a night, and a full tank plus one can does not quite cover two nights — refuelling is a recurring
 trip, not a one-off errand. Retune these together, never one alone.
+
+### Monsters
+
+`MonsterSpawner` on `Systems` spawns a wave at **dusk** and clears it at **dawn** — "they don't come
+during the day" is true in the simulation, not just in the journal. `Assets/Prefabs/Monster.prefab`.
+
+- Monsters must **never** decide safety by measuring distance themselves; they call
+  `Generator.GetProtector` / `IsPointProtected`. A monster whose destination is protected walks to
+  the boundary and waits there. `Monster.Move` also re-checks after every move and pushes back out,
+  so no collision slide or steering bug can ever put one inside the light.
+- Steering is direct with a `CharacterController` (flat level, slides off walls for free).
+  Switch to `NavMeshAgent` when a level has real geometry — `com.unity.ai.navigation` is installed.
+- Balance now: chase 4.0 vs player walk 5 / sprint 9 — always outrunnable, so death is a mistake,
+  not a dice roll. 25 damage every 1.2s = 4 hits, ~4.8s of standing still.
+- `PlayerVitals` regenerates **only inside protection**, which makes the house the only place to
+  recover without saying so.
+- **Doors:** a hunting monster that meets a shut door leans on it for `doorForceTime` (1.4s) and
+  then it swings open. It cannot reach a door while the generator runs — the whole house sits inside
+  the radius — so "they can open doors" is really "once the light dies". `DoorInteraction.canBeForced`
+  can be cleared for a door that should hold.
+- **Known limit:** steering is direct, so monsters navigate open ground and doorways but snag on
+  interior corners. Bake a NavMesh and swap to `NavMeshAgent` before relying on indoor pursuit.
+
+### On-screen text
+
+All placeholder HUD goes through `Hud` (`Assets/Scripts/Hud.cs`) — never raw `GUI.Label`, whose
+12px dark-grey default is unreadable against a night field. `Hud.Row(n, text, tint)` for corner
+readouts, `Hud.CentrePrompt(text)` for the interaction prompt. Sizes scale with screen height.
+
+Row numbers are claimed and must not collide: **0-1** TimeOfDay, **2** Generator, **3** PlayerVitals,
+**4** MonsterSpawner. Claim the next free number for a new readout.
 
 ## C# conventions
 
