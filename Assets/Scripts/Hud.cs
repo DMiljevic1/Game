@@ -11,11 +11,13 @@ using UnityEngine;
 public static class Hud
 {
     private static GUIStyle readout;
+    private static GUIStyle readoutRight;
     private static GUIStyle prompt;
     private static GUIStyle centered;
     private static int builtForHeight = -1;
 
     public static GUIStyle Readout { get { Build(); return readout; } }
+    public static GUIStyle ReadoutRight { get { Build(); return readoutRight; } }
     public static GUIStyle Prompt { get { Build(); return prompt; } }
     public static GUIStyle Centered { get { Build(); return centered; } }
 
@@ -36,6 +38,9 @@ public static class Hud
         readout.alignment = TextAnchor.MiddleLeft;
         readout.normal.textColor = Color.white;
 
+        readoutRight = new GUIStyle(readout);
+        readoutRight.alignment = TextAnchor.MiddleRight;
+
         prompt = new GUIStyle(GUI.skin.label);
         prompt.fontSize = promptSize;
         prompt.fontStyle = FontStyle.Bold;
@@ -50,7 +55,9 @@ public static class Hud
     {
         Color previous = GUI.color;
 
-        GUI.color = new Color(0f, 0f, 0f, 0.85f);
+        // Shadow follows the text's alpha, so anything that fades out fades away
+        // completely instead of leaving its shadow behind.
+        GUI.color = new Color(0f, 0f, 0f, 0.85f * tint.a);
         GUI.Label(new Rect(rect.x + 2f, rect.y + 2f, rect.width, rect.height), text, style);
 
         GUI.color = tint;
@@ -74,6 +81,21 @@ public static class Hud
     {
         Build();
         Label(new Rect(14f, 10f + row * LineHeight, 700f, LineHeight), text, readout, tint);
+    }
+
+    /// <summary>
+    /// A readout row in the top-RIGHT corner. Row 0 is the top line. Right-hand rows
+    /// are numbered separately from <see cref="Row"/>, so the two corners cannot collide.
+    /// </summary>
+    public static void RowRight(int row, string text)
+    {
+        RowRight(row, text, Color.white);
+    }
+
+    public static void RowRight(int row, string text, Color tint)
+    {
+        Build();
+        Label(new Rect(Screen.width - 714f, 10f + row * LineHeight, 700f, LineHeight), text, readoutRight, tint);
     }
 
     /// <summary>The interaction prompt, centred just below the crosshair.</summary>

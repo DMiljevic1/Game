@@ -27,6 +27,13 @@ public class MonsterSpawner : MonoBehaviour
     [Tooltip("Never spawn closer than this to the player: no appearing in someone's face.")]
     public float minDistanceFromPlayer = 28f;
 
+    [Header("Patrol")]
+    [Tooltip("Parent of the patrol points. Its children, in order, become the route " +
+             "every spawned monster walks. Leave empty and they wander the area instead.")]
+    public Transform patrolRoute;
+
+    private Transform[] routePoints;
+
     private readonly List<GameObject> spawned = new List<GameObject>();
     private TimeOfDay clock;
 
@@ -66,9 +73,22 @@ public class MonsterSpawner : MonoBehaviour
         else if (current == DayPhase.Dawn) DespawnAll();
     }
 
+    /// <summary>The route's children, cached: the same array is shared by the whole wave.</summary>
+    private Transform[] RoutePoints()
+    {
+        if (patrolRoute == null) return null;
+        if (routePoints != null && routePoints.Length == patrolRoute.childCount) return routePoints;
+
+        routePoints = new Transform[patrolRoute.childCount];
+        for (int i = 0; i < routePoints.Length; i++) routePoints[i] = patrolRoute.GetChild(i);
+        return routePoints;
+    }
+
     public void SpawnWave()
     {
         DespawnAll();
+
+        Transform[] route = RoutePoints();
 
         int count = Mathf.Min(maxCount, baseCount + extraPerDay * (clock.DayNumber - 1));
 
@@ -86,6 +106,12 @@ public class MonsterSpawner : MonoBehaviour
                 m.SetTarget(player);
                 m.roamCenter = areaCenter;
                 m.roamRadius = areaRadius;
+
+                // Spread the wave around the loop so they do not walk it in single file.
+                if (route != null && route.Length > 0)
+                {
+                    m.SetPatrolRoute(route, route.Length > 0 ? (i * route.Length) / count : 0);
+                }
             }
 
             spawned.Add(go);

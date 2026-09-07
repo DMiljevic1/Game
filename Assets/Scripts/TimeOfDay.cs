@@ -33,6 +33,8 @@ public class TimeOfDay : MonoBehaviour
     public bool paused = false;
     [Tooltip("Where the very first cycle starts, 0-1 through the day phase.")]
     [Range(0f, 1f)] public float startOfDayOffset = 0f;
+    [Tooltip("Which phase the level opens in. Day honours startOfDayOffset; the others open at their own start.")]
+    public DayPhase startPhase = DayPhase.Day;
 
     [Header("Lighting")]
     public Light sun;
@@ -136,7 +138,7 @@ public class TimeOfDay : MonoBehaviour
             Debug.LogError("TimeOfDay has no sun assigned; lighting will not change with time.", this);
         }
 
-        cycleTime = dayLength * startOfDayOffset;
+        cycleTime = StartCycleTime();
         phase = PhaseAt(cycleTime);
     }
 
@@ -174,6 +176,19 @@ public class TimeOfDay : MonoBehaviour
         }
 
         ApplyLighting();
+    }
+
+    // Only Day reads startOfDayOffset; the rest open at their own boundary so a
+    // level can drop the player straight into night without faking the clock.
+    private float StartCycleTime()
+    {
+        switch (startPhase)
+        {
+            case DayPhase.Dusk: return dayLength;
+            case DayPhase.Night: return dayLength + duskLength;
+            case DayPhase.Dawn: return dayLength + duskLength + nightLength;
+            default: return dayLength * startOfDayOffset;
+        }
     }
 
     private float Progress(float phaseStart, float length)

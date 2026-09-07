@@ -14,6 +14,9 @@ public class DoorInteraction : MonoBehaviour, IInteractable
     [Tooltip("Can a monster force this open? Clear it for a door that should stay shut.")]
     public bool canBeForced = true;
 
+    [Tooltip("How far the bang of this door carries, in metres.")]
+    public float noiseRadius = 14f;
+
     private Quaternion closedRotation;
     private Quaternion openRotation;
     private bool isOpen = false;
@@ -49,7 +52,13 @@ public class DoorInteraction : MonoBehaviour, IInteractable
     /// <summary>Open or close from code — used by monsters forcing their way in.</summary>
     public void SetOpen(bool open)
     {
+        if (isOpen == open) return;
         isOpen = open;
+
+        // A door shoved open bangs, and that bang is heard by everything else out
+        // there. The player's own door noise is emitted by PlayerInteractor instead,
+        // so opening one by hand never sounds twice.
+        Noise.Emit(transform.position, noiseRadius, gameObject);
     }
 
     void Update()

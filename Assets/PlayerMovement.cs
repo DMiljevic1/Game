@@ -13,9 +13,35 @@ public class PlayerMovement : MonoBehaviour
     private CharacterController controller;
     private Vector3 verticalVelocity;
 
+    // What is in the hands, as speed only. Pushed in by PlayerInteractor when an item
+    // is picked up and cleared on every way it leaves the hands, so movement never has
+    // to look at the carried item -- and can never be left slow with empty hands.
+    private CarryLoad load = CarryLoad.None;
+
+    /// <summary>The penalty currently applied. CarryLoad.None when carrying nothing.</summary>
+    public CarryLoad Load { get { return load; } }
+
+    /// <summary>Walking speed right now, after whatever is being carried.</summary>
+    public float CurrentWalkSpeed { get { return speed * load.moveMultiplier; } }
+
+    /// <summary>False while holding something too big to run with.</summary>
+    public bool CanSprint { get { return load.allowSprint; } }
+
     void Start()
     {
         controller = GetComponent<CharacterController>();
+    }
+
+    /// <summary>Weigh the player down. Call it once, when the item is taken into the hands.</summary>
+    public void SetCarryLoad(CarryLoad newLoad)
+    {
+        load = newLoad;
+    }
+
+    /// <summary>Back to empty-handed speed. Dropping, selling and dying all end here.</summary>
+    public void ClearCarryLoad()
+    {
+        load = CarryLoad.None;
     }
 
     void Update()
@@ -23,7 +49,13 @@ public class PlayerMovement : MonoBehaviour
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
 
-        float currentSpeed = Input.GetKey(sprintKey) ? sprintSpeed : speed;
+        // A load that forbids sprinting swallows the key entirely, so a heavy item is
+        // slow whatever the player holds down.
+        bool sprinting = load.allowSprint && Input.GetKey(sprintKey);
+
+        float currentSpeed = sprinting
+            ? sprintSpeed * load.sprintMultiplier
+            : speed * load.moveMultiplier;
 
         // Sample this once, before any Move. isGrounded is only meaningful straight
         // after the previous Move; calling Move again re-evaluates and can clear it.

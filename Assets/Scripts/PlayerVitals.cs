@@ -23,10 +23,22 @@ public class PlayerVitals : MonoBehaviour
     public event System.Action OnDied = delegate { };
 
     private float lastDamageTime = -999f;
+    private float lastDamageAmount;
+    private Vector3 lastDeathPosition;
     private CharacterController controller;
 
     public bool IsAlive { get { return health > 0f; } }
     public float HealthNormalized { get { return maxHealth <= 0f ? 0f : Mathf.Clamp01(health / maxHealth); } }
+
+    /// <summary>Size of the most recent hit, so feedback can scale itself without OnDamaged carrying a payload.</summary>
+    public float LastDamageAmount { get { return lastDamageAmount; } }
+
+    /// <summary>
+    /// Where the player was standing when they were last killed. Recorded before
+    /// Respawn moves them, so an OnDied handler can use it without having to know
+    /// that it happens to run before the teleport.
+    /// </summary>
+    public Vector3 LastDeathPosition { get { return lastDeathPosition; } }
 
     void Awake()
     {
@@ -54,6 +66,7 @@ public class PlayerVitals : MonoBehaviour
 
         health -= amount;
         lastDamageTime = Time.time;
+        lastDamageAmount = amount;
         OnDamaged();
 
         if (health <= 0f)
@@ -65,6 +78,10 @@ public class PlayerVitals : MonoBehaviour
 
     private void Die()
     {
+        // Pin the spot before anything reacts: whatever the player was carrying belongs
+        // here, not wherever Respawn is about to put them.
+        lastDeathPosition = transform.position;
+
         OnDied();
         Respawn();
     }
