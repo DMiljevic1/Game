@@ -14,6 +14,9 @@ public static class Hud
     private static GUIStyle readoutRight;
     private static GUIStyle prompt;
     private static GUIStyle centered;
+    private static GUIStyle slotLabel;
+    private static GUIStyle slotKey;
+    private static Texture2D pixel;
     private static int builtForHeight = -1;
 
     public static GUIStyle Readout { get { Build(); return readout; } }
@@ -21,8 +24,21 @@ public static class Hud
     public static GUIStyle Prompt { get { Build(); return prompt; } }
     public static GUIStyle Centered { get { Build(); return centered; } }
 
+    /// <summary>Small centred text that fits inside an inventory slot.</summary>
+    public static GUIStyle SlotLabel { get { Build(); return slotLabel; } }
+
+    /// <summary>The key badge in the corner of an inventory slot.</summary>
+    public static GUIStyle SlotKey { get { Build(); return slotKey; } }
+
     /// <summary>Height of one readout line, for stacking rows down the corner.</summary>
     public static float LineHeight { get { Build(); return readout.fontSize * 1.5f; } }
+
+    /// <summary>
+    /// Height reserved along the bottom of the screen for the inventory bar. One number,
+    /// one owner: the bar draws inside it and everything else keeps clear above it, so the
+    /// two cannot drift apart and overlap.
+    /// </summary>
+    public static float BottomBarHeight { get { return Mathf.Round(Screen.height * 0.095f); } }
 
     private static void Build()
     {
@@ -48,6 +64,46 @@ public static class Hud
         prompt.normal.textColor = Color.white;
 
         centered = new GUIStyle(prompt);
+
+        slotLabel = new GUIStyle(GUI.skin.label);
+        slotLabel.fontSize = Mathf.Max(11, Mathf.RoundToInt(Screen.height * 0.0155f)); // ~17px at 1080p
+        slotLabel.fontStyle = FontStyle.Bold;
+        slotLabel.alignment = TextAnchor.MiddleCenter;
+        slotLabel.wordWrap = true;
+        slotLabel.normal.textColor = Color.white;
+
+        slotKey = new GUIStyle(slotLabel);
+        slotKey.alignment = TextAnchor.UpperLeft;
+        slotKey.wordWrap = false;
+    }
+
+    /// <summary>
+    /// A flat filled rectangle. One shared 1x1 texture, built once and rebuilt only if the
+    /// graphics device throws it away -- so drawing a panel costs no allocation per frame.
+    /// </summary>
+    public static void Box(Rect rect, Color color)
+    {
+        if (pixel == null)
+        {
+            pixel = new Texture2D(1, 1);
+            pixel.SetPixel(0, 0, Color.white);
+            pixel.Apply();
+            pixel.hideFlags = HideFlags.HideAndDontSave;
+        }
+
+        Color previous = GUI.color;
+        GUI.color = color;
+        GUI.DrawTexture(rect, pixel);
+        GUI.color = previous;
+    }
+
+    /// <summary>An outlined rectangle, drawn as four thin boxes.</summary>
+    public static void Frame(Rect rect, Color color, float thickness)
+    {
+        Box(new Rect(rect.x, rect.y, rect.width, thickness), color);
+        Box(new Rect(rect.x, rect.yMax - thickness, rect.width, thickness), color);
+        Box(new Rect(rect.x, rect.y, thickness, rect.height), color);
+        Box(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), color);
     }
 
     /// <summary>Draw text with a shadow behind it. Tint applies to the text only.</summary>

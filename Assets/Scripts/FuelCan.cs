@@ -26,9 +26,10 @@ public class FuelCan : Carryable
     {
         if (IsHeld) return;
 
+        string note = PickUpRefusal(interactor);
         options.Add(new InteractionOption(pickUpKey, IsEmpty
-            ? "Pick up empty can"
-            : string.Format("Pick up {0} ({1:0} fuel)", itemName, fuel)));
+            ? "Pick up empty can" + note
+            : string.Format("Pick up {0} ({1:0} fuel){2}", itemName, fuel, note)));
     }
 
     /// <summary>Pour everything into a generator. Returns how much was actually accepted.</summary>

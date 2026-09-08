@@ -72,12 +72,14 @@ public class Valuable : Carryable
                 carryMoveMultiplier = 1f;
                 carrySprintMultiplier = 1f;
                 allowSprintWhileCarried = true;
+                canBeStoredInInventory = true;
                 break;
 
             case ValuableSize.Medium:
                 carryMoveMultiplier = 0.9f;
                 carrySprintMultiplier = 0.9f;
                 allowSprintWhileCarried = true;
+                canBeStoredInInventory = true;
                 break;
 
             case ValuableSize.Large:
@@ -86,6 +88,10 @@ public class Valuable : Carryable
                 carryMoveMultiplier = 0.62f;
                 carrySprintMultiplier = 1f;      // unused while sprinting is off
                 allowSprintWhileCarried = false;
+
+                // Too big to shoulder as well as too heavy to run with: the television is a
+                // whole trip in your hands, never one of four things you grabbed on the way.
+                canBeStoredInInventory = false;
                 break;
 
             case ValuableSize.Custom:
@@ -101,6 +107,7 @@ public class Valuable : Carryable
         if (IsHeld) return;
 
         string note = size == ValuableSize.Small ? "" : (allowSprintWhileCarried ? " - heavy" : " - no sprint");
-        options.Add(new InteractionOption(pickUpKey, string.Format("Pick up {0} (${1:N0}{2})", itemName, value, note)));
+        options.Add(new InteractionOption(pickUpKey,
+            string.Format("Pick up {0} (${1:N0}{2}){3}", itemName, value, note, PickUpRefusal(interactor))));
     }
 }

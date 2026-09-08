@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.AI.Navigation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -93,6 +94,7 @@ public static class PrototypeEnvironmentBuilder
 
         PlaceGameplayObjects(player, systems, generator, sunGo, houseLights);
         ApplyAtmosphere();
+        RebakeNavMesh(systems);
 
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());
@@ -237,6 +239,27 @@ public static class PrototypeEnvironmentBuilder
         return t;
     }
 
+    /// <summary>
+    /// Re-bake the walkable surface. Every wall, trunk and rock this script just replaced
+    /// was an input to it, so a rebuild without this leaves the monsters routing around
+    /// forest that is no longer there. The NavMeshSurface lives on Systems, which is in the
+    /// Keep set, so its settings and its baked asset survive the clear.
+    /// </summary>
+    static void RebakeNavMesh(GameObject systems)
+    {
+        NavMeshSurface surface = systems.GetComponent<NavMeshSurface>();
+        if (surface == null)
+        {
+            Debug.LogWarning("No NavMeshSurface on Systems: monsters will roam in straight lines. " +
+                             "Add one (collect All, geometry Physics Colliders) and rebuild.");
+            return;
+        }
+
+        surface.BuildNavMesh();
+        if (surface.navMeshData != null) EditorUtility.SetDirty(surface.navMeshData);
+        AssetDatabase.SaveAssets();
+    }
+
     static void BuildBoundary(Transform ground)
     {
         // Derived from the ground's actual renderer bounds, never hardcoded, so a
@@ -328,6 +351,10 @@ public static class PrototypeEnvironmentBuilder
         hinge.transform.SetParent(parent, false);
         hinge.transform.localPosition = hingePos;
         hinge.transform.localEulerAngles = new Vector3(0f, hingeYaw, 0f);
+
+        // Kept out of the NavMesh bake: a door swings, and a mesh baked round a shut one
+        // would leave every room an unreachable island for the rest of the night.
+        hinge.AddComponent<NavMeshModifier>().ignoreFromBuild = true;
 
         // Targeting is PlayerInteractor's job, so the hinge needs nothing wired.
         DoorInteraction di = hinge.AddComponent<DoorInteraction>();

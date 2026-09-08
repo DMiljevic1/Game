@@ -48,6 +48,10 @@ public class PlayerInteractor : MonoBehaviour
     [Tooltip("Movement that a heavy item slows down. Found on this object if left empty.")]
     public PlayerMovement movement;
 
+    [Tooltip("Optional four-slot pack. With one, picking up with full hands stows what you " +
+             "are holding; without one, it drops it, which is the behaviour that came first.")]
+    public PlayerInventory inventory;
+
     [Tooltip("How far above the ground a dropped item is placed, so it never ends up sunk into the floor.")]
     public float dropClearance = 0.05f;
 
@@ -336,11 +340,49 @@ public class PlayerInteractor : MonoBehaviour
         return false;
     }
 
-    /// <summary>Take an item into the hands. Anything already held is dropped first.</summary>
+    /// <summary>
+    /// Why a pickup would be refused right now, or "" if it would succeed. There are exactly
+    /// two reasons, and they need different answers from the player -- one is solved by
+    /// selling or dropping something, the other only by putting down what is in your hands --
+    /// so the prompt says which.
+    /// </summary>
+    public string PickUpRefusalReason
+    {
+        get
+        {
+            if (carried == null) return "";
+            if (inventory == null) return "";   // no pack: the old behaviour drops what you hold
+
+            if (!carried.canBeStoredInInventory) return "put the " + carried.itemName + " down first";
+            return inventory.CanStowCarried ? "" : "hands and pack full";
+        }
+    }
+
+    /// <summary>
+    /// Can the player take something new into their hands right now? False only when the
+    /// hands are full AND what is in them cannot be put away -- the one case where a pickup
+    /// has to be refused, because the alternative is trading away what you hold.
+    /// </summary>
+    public bool CanPickUp { get { return PickUpRefusalReason.Length == 0; } }
+
+    /// <summary>
+    /// Take an item into the hands. With full hands and a pack, what is already held is
+    /// stowed; with full hands and no pack, it is dropped, as it always was. If the pack
+    /// is full too the pickup is refused outright, so the item in your hands is never lost
+    /// or swapped for the one on the floor.
+    /// </summary>
     public void Carry(Carryable item)
     {
         if (item == null || carrySocket == null) return;
-        if (carried != null) DropCarried();
+
+        if (carried != null)
+        {
+            if (inventory != null)
+            {
+                if (!inventory.StowCarried()) return;
+            }
+            else DropCarried();
+        }
 
         carried = item;
         item.OnPickedUp(carrySocket);
@@ -473,7 +515,8 @@ public class PlayerInteractor : MonoBehaviour
                 line += "   [" + heldOptions[i].key + "] " + heldOptions[i].label;
             }
 
-            Hud.Label(new Rect(14f, Screen.height - Hud.LineHeight - 12f, 900f, Hud.LineHeight),
+            // Above the inventory bar's reserved strip, so the two never overlap.
+            Hud.Label(new Rect(14f, Screen.height - Hud.BottomBarHeight - Hud.LineHeight - 6f, 900f, Hud.LineHeight),
                       line, Hud.Readout, new Color(1f, 0.92f, 0.6f));
         }
     }

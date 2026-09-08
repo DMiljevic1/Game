@@ -23,9 +23,14 @@ public enum MonsterState
 /// is followed only as far as the boundary, where it waits. That is the whole lesson
 /// of the first night, and nothing has to say it out loud.
 ///
-/// Movement is direct steering with a CharacterController rather than a NavMesh: the
-/// level is flat and the controller slides along walls for free. Swap to NavMeshAgent
-/// when levels get real geometry.
+/// Movement is still its own: a CharacterController it drives itself, so gravity, the
+/// safe-zone push-out and attack-by-touch all stay here. Only the *route* comes from the
+/// baked NavMesh, via <see cref="NavPathFollower"/> -- enough to round a corner without
+/// handing steering over to a NavMeshAgent.
+///
+/// Where it goes when nothing has its attention is not decided here at all. That is
+/// <see cref="MonsterPatrol"/>, which knows nothing about hearing and is reusable by a
+/// monster that detects some other way.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class Monster : MonoBehaviour, INoiseListener
@@ -50,22 +55,29 @@ public class Monster : MonoBehaviour, INoiseListener
     public float arriveDistance = 1.2f;
 
     [Header("Patrol")]
-    [Tooltip("Walked in order. Leave empty to wander the roam circle instead.")]
+    [Tooltip("Optional places worth visiting; MonsterSpawner fills this from PatrolRoute. " +
+             "They only bias the roam -- they are not a loop, see MonsterPatrol.anchorChance.")]
     public Transform[] patrolPoints;
-    [Tooltip("Off = pick the next point at random rather than walking the loop in order.")]
-    public bool patrolInOrder = true;
-    [Tooltip("Seconds spent standing at each patrol point, listening.")]
-    public float patrolWaitTime = 2f;
+    [Tooltip("Seconds of barely moving before it writes the current leg off and picks another.")]
+    public float patrolStuckTime = 1.5f;
+    [Tooltip("Seconds allowed per metre of the leg before it is abandoned. Catches the slow " +
+             "wedges that never quite stop moving, which a stuck timer alone would never see.")]
+    public float patrolSecondsPerMetre = 1.6f;
 
-    [Header("Patrol fallback (used when no patrol points are assigned)")]
+    [Header("Patrol area (handed to MonsterPatrol on Start)")]
     public Vector3 roamCenter = Vector3.zero;
     public float roamRadius = 45f;
 
     [Header("Investigate")]
     [Tooltip("Seconds spent searching at a noise before giving up and going back to patrol.")]
     public float investigateDuration = 6f;
-    [Tooltip("Degrees per second it turns on the spot while searching.")]
+    [Tooltip("Degrees per second it turns while looking around.")]
     public float scanTurnSpeed = 70f;
+    [Tooltip("Seconds it holds each direction before turning to a new one. Standing and " +
+             "listening reads as searching; revolving on the spot reads as a bug.")]
+    public float scanHoldTime = 0.9f;
+    [Tooltip("How far either side of where it is facing a look may go.")]
+    public float scanSweepAngle = 110f;
 
     [Header("Aggression")]
     [Tooltip("Every heard sound adds to this; it decays with silence. Cross the " +
@@ -97,15 +109,20 @@ public class Monster : MonoBehaviour, INoiseListener
     public bool showDebug = true;
 
     private CharacterController controller;
+    private MonsterPatrol patrol;
+    private readonly NavPathFollower follower = new NavPathFollower();
     private MonsterState state = MonsterState.Patrol;
     private Vector3 destination;
     private Vector3 lastHeardPosition;
     private float lastHeardTime = -999f;
     private float agitation;
     private float investigateTimer;
+    private Quaternion scanTarget;
+    private float scanHoldTimer;
     private float patrolWaitTimer;
-    private int patrolIndex;
-    private Vector3 roamPoint;
+    private float patrolStuckTimer;
+    private float patrolLegTimer;
+    private float patrolLegAllowance;
     private float verticalVelocity;
     private float nextAttackTime;
     private DoorInteraction forcingDoor;
@@ -135,6 +152,10 @@ public class Monster : MonoBehaviour, INoiseListener
     void Awake()
     {
         controller = GetComponent<CharacterController>();
+
+        // Added rather than required, so an existing prefab keeps working untouched.
+        patrol = GetComponent<MonsterPatrol>();
+        if (patrol == null) patrol = gameObject.AddComponent<MonsterPatrol>();
     }
 
     void OnEnable()
@@ -149,8 +170,13 @@ public class Monster : MonoBehaviour, INoiseListener
 
     void Start()
     {
-        PickRoamPoint();
-        destination = NextPatrolDestination();
+        // Start, not Awake: MonsterSpawner writes these straight after Instantiate, which is
+        // already too late for Awake.
+        patrol.areaCenter = roamCenter;
+        patrol.areaRadius = roamRadius;
+        if (patrolPoints != null && patrolPoints.Length > 0) patrol.anchors = patrolPoints;
+
+        BeginPatrolLeg();
     }
 
     // ---------------------------------------------------------------- hearing
@@ -216,15 +242,71 @@ public class Monster : MonoBehaviour, INoiseListener
         {
             patrolWaitTimer -= Time.deltaTime;
             Move(Vector3.zero);
-            Scan();
+            return;   // stands still, still facing the way it was walking. Nothing turns on the spot.
+        }
+
+        if (!patrol.HasDestination)
+        {
+            BeginPatrolLeg();
             return;
         }
 
-        if (MoveTowards(destination, patrolSpeed)) return;
+        // The generator may have started since this leg was chosen; the light is out of bounds
+        // whether or not it was when it set off.
+        if (Generator.IsPointProtected(patrol.Destination) || PatrolLegLost())
+        {
+            BeginPatrolLeg();
+            return;
+        }
 
-        patrolWaitTimer = patrolWaitTime;
-        AdvancePatrol();
-        destination = NextPatrolDestination();
+        destination = patrol.Destination;
+        if (MoveTowards(destination, patrolSpeed))
+        {
+            patrolLegTimer += Time.deltaTime;
+            return;
+        }
+
+        // Arrived. Usually straight on to the next leg; occasionally a short breather.
+        patrol.Forget();
+        follower.Clear();
+        patrolWaitTimer = patrol.NextPauseTime();
+    }
+
+    /// <summary>Take a new destination and reset everything that judges the trip.</summary>
+    private void BeginPatrolLeg()
+    {
+        follower.Clear();
+        patrolStuckTimer = 0f;
+        patrolLegTimer = 0f;
+
+        if (!patrol.ChooseDestination(transform.position))
+        {
+            // Nowhere legal right now -- usually boxed in by the light. Back off a moment
+            // rather than running twenty pathfinds every frame for the rest of the night.
+            Move(Vector3.zero);
+            patrolWaitTimer = 0.25f;
+            return;
+        }
+
+        destination = patrol.Destination;
+        patrolLegAllowance = FlatDistance(transform.position, destination) * patrolSecondsPerMetre + 4f;
+    }
+
+    /// <summary>
+    /// True when this leg is not going to happen: no route to it, wedged against something,
+    /// or simply taking far longer than the distance can explain. Any of the three means
+    /// pick somewhere else, rather than lean on a wall for the rest of the night.
+    /// </summary>
+    private bool PatrolLegLost()
+    {
+        if (follower.Blocked) return true;
+
+        Vector3 velocity = controller.velocity;
+        velocity.y = 0f;
+        if (velocity.magnitude < patrolSpeed * 0.3f) patrolStuckTimer += Time.deltaTime;
+        else patrolStuckTimer = 0f;
+
+        return patrolStuckTimer >= patrolStuckTime || patrolLegTimer >= patrolLegAllowance;
     }
 
     private void TickPursue(float speed)
@@ -240,6 +322,7 @@ public class Monster : MonoBehaviour, INoiseListener
 
         state = MonsterState.Investigate;
         investigateTimer = investigateDuration;
+        scanHoldTimer = 0f;   // look somewhere immediately rather than after the first hold
     }
 
     private void TickInvestigate()
@@ -254,71 +337,44 @@ public class Monster : MonoBehaviour, INoiseListener
         agitation = 0f;
         state = MonsterState.Patrol;
         patrolWaitTimer = 0f;
-        destination = NextPatrolDestination();
+        patrol.Forget();       // a fresh destination, so it walks on rather than back
+        follower.Clear();
     }
 
-    /// <summary>Turn on the spot, listening. The blind equivalent of looking around.</summary>
+    /// <summary>
+    /// Look around: turn to a direction, hold it, then choose another. Deliberately not a
+    /// continuous spin -- searching has to read as searching, and a monster revolving on
+    /// the spot reads as a bug. Only ever runs while investigating.
+    /// </summary>
     private void Scan()
     {
-        transform.Rotate(0f, scanTurnSpeed * Time.deltaTime, 0f, Space.Self);
+        scanHoldTimer -= Time.deltaTime;
+        if (scanHoldTimer <= 0f)
+        {
+            float yaw = transform.eulerAngles.y + Random.Range(-scanSweepAngle, scanSweepAngle);
+            scanTarget = Quaternion.Euler(0f, yaw, 0f);
+
+            // Hold *after* arriving, so a wide turn does not eat its own pause.
+            scanHoldTimer = scanHoldTime +
+                            Quaternion.Angle(transform.rotation, scanTarget) / Mathf.Max(1f, scanTurnSpeed);
+        }
+
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, scanTarget,
+                                                      scanTurnSpeed * Time.deltaTime);
     }
 
     // ---------------------------------------------------------------- patrol route
 
-    private Vector3 NextPatrolDestination()
-    {
-        if (HasPatrolRoute())
-        {
-            Transform point = patrolPoints[Mathf.Clamp(patrolIndex, 0, patrolPoints.Length - 1)];
-            if (point != null) return KeepOutOfSafeZone(point.position);
-        }
-
-        return roamPoint;
-    }
-
-    private void AdvancePatrol()
-    {
-        if (HasPatrolRoute())
-        {
-            if (patrolInOrder) patrolIndex = (patrolIndex + 1) % patrolPoints.Length;
-            else patrolIndex = Random.Range(0, patrolPoints.Length);
-            return;
-        }
-
-        PickRoamPoint();
-    }
-
-    private bool HasPatrolRoute()
-    {
-        return patrolPoints != null && patrolPoints.Length > 0;
-    }
-
     /// <summary>
-    /// Hand a shared route to a spawned monster. The start index is per-monster so a
-    /// wave does not walk the loop in single file.
+    /// Hand a spawned monster the level's places of interest. They become MonsterPatrol
+    /// anchors -- somewhere it chooses more often than average, not a loop it walks -- so
+    /// startIndex no longer means anything; it is kept so MonsterSpawner is unchanged.
     /// </summary>
     public void SetPatrolRoute(Transform[] points, int startIndex)
     {
         patrolPoints = points;
-        patrolIndex = (points == null || points.Length == 0)
-                    ? 0
-                    : ((startIndex % points.Length) + points.Length) % points.Length;
-        destination = NextPatrolDestination();
-    }
-
-    private void PickRoamPoint()
-    {
-        for (int attempt = 0; attempt < 12; attempt++)
-        {
-            Vector2 c = Random.insideUnitCircle * roamRadius;
-            Vector3 p = roamCenter + new Vector3(c.x, transform.position.y, c.y);
-
-            if (Generator.IsPointProtected(p)) continue;   // never wander into the light
-            roamPoint = p;
-            return;
-        }
-
-        roamPoint = transform.position;   // boxed in; stay put this cycle
+        if (patrol == null) patrol = GetComponent<MonsterPatrol>();
+        if (patrol != null) patrol.anchors = points;
     }
 
     // ---------------------------------------------------------------- doors
@@ -372,7 +428,11 @@ public class Monster : MonoBehaviour, INoiseListener
 
     // ---------------------------------------------------------------- moving
 
-    /// <summary>Walk towards a point. Returns false once it has arrived.</summary>
+    /// <summary>
+    /// Walk towards a point, routed round geometry by the baked NavMesh. Returns false once
+    /// it has arrived. With no mesh baked the follower hands the point straight back, which
+    /// is exactly the direct steering this used to do.
+    /// </summary>
     private bool MoveTowards(Vector3 point, float speed)
     {
         Vector3 flat = point - transform.position;
@@ -384,9 +444,15 @@ public class Monster : MonoBehaviour, INoiseListener
             return false;
         }
 
-        Vector3 dir = flat.normalized;
+        Vector3 step = follower.Steer(transform.position, point) - transform.position;
+        step.y = 0f;
+        if (step.sqrMagnitude < 0.0001f) step = flat;   // standing on the next corner: aim past it
+
+        Vector3 dir = step.normalized;
         Move(dir * speed);
-        Face(dir);
+        Face(dir);                                       // facing always follows travel, never a timer
+
+        if (showDebug) follower.DrawDebug(transform.position, StateColor());
         return true;
     }
 
@@ -521,17 +587,13 @@ public class Monster : MonoBehaviour, INoiseListener
 
     void OnDrawGizmosSelected()
     {
-        if (!showDebug || !HasPatrolRoute()) return;
+        if (!showDebug || patrolPoints == null) return;
 
+        // Spheres, not a loop: these are places it may head for, not an order it walks in.
         Gizmos.color = new Color(0.5f, 0.8f, 1f, 0.8f);
         for (int i = 0; i < patrolPoints.Length; i++)
         {
-            Transform a = patrolPoints[i];
-            Transform b = patrolPoints[(i + 1) % patrolPoints.Length];
-            if (a == null) continue;
-
-            Gizmos.DrawWireSphere(a.position, 0.5f);
-            if (b != null) Gizmos.DrawLine(a.position, b.position);
+            if (patrolPoints[i] != null) Gizmos.DrawWireSphere(patrolPoints[i].position, 0.5f);
         }
     }
 }

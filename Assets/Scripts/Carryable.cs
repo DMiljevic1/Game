@@ -50,6 +50,11 @@ public class Carryable : MonoBehaviour, IInteractable
     [Tooltip("Clear it for something too big to run with.")]
     public bool allowSprintWhileCarried = true;
 
+    [Tooltip("Can this go on your back? Clear it for anything too big to shoulder -- a " +
+             "television is carried in your hands or not at all, so it can never take up " +
+             "one of the four slots, and you cannot pick anything else up while holding it.")]
+    public bool canBeStoredInInventory = true;
+
     [Header("Held pose")]
     [Tooltip("Local offset and rotation while held, relative to the carry socket.")]
     public Vector3 heldPosition = Vector3.zero;
@@ -58,8 +63,17 @@ public class Carryable : MonoBehaviour, IInteractable
     private Collider[] colliders;
     private Rigidbody body;
     private bool held;
+    private bool stowed;
 
+    /// <summary>
+    /// True while this is in the player's possession rather than lying in the world --
+    /// in the hands OR stowed in a pack slot. Every "is it still on the floor?" guard
+    /// reads this, so stowing something cannot make it look pickable again.
+    /// </summary>
     public bool IsHeld { get { return held; } }
+
+    /// <summary>True while this is in a pack slot rather than in the hands.</summary>
+    public bool IsStowed { get { return stowed; } }
 
     /// <summary>How much this slows whoever holds it. Handed to PlayerMovement once on
     /// pick-up by the interactor -- nothing reads it per frame.</summary>
@@ -85,10 +99,23 @@ public class Carryable : MonoBehaviour, IInteractable
         }
     }
 
+    /// <summary>
+    /// The note explaining why a pickup will be refused, or "". Lives here so every item
+    /// says the same thing and a new Carryable gets the wording without knowing a pack
+    /// exists -- being unable to pick something up with no explanation reads as a bug.
+    /// </summary>
+    protected static string PickUpRefusal(PlayerInteractor interactor)
+    {
+        if (interactor == null) return "";
+
+        string reason = interactor.PickUpRefusalReason;
+        return reason.Length == 0 ? "" : "  - " + reason;
+    }
+
     public virtual void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
         if (held) return;
-        options.Add(new InteractionOption(pickUpKey, "Pick up " + itemName));
+        options.Add(new InteractionOption(pickUpKey, "Pick up " + itemName + PickUpRefusal(interactor)));
     }
 
     public virtual void Interact(PlayerInteractor interactor, KeyCode key)
@@ -100,6 +127,7 @@ public class Carryable : MonoBehaviour, IInteractable
     public virtual void OnPickedUp(Transform socket)
     {
         held = true;
+        stowed = false;
 
         // Colliders off while held, or the item shoves the player around and blocks
         // the interaction ray.
@@ -111,9 +139,42 @@ public class Carryable : MonoBehaviour, IInteractable
         transform.localRotation = Quaternion.Euler(heldEuler);
     }
 
+    /// <summary>
+    /// Into a pack slot: still the player's, just not in their hands. The object is
+    /// deactivated -- never cloned, never destroyed -- so it comes back out as the same
+    /// GameObject with the same script, value, name and state it had on the floor.
+    ///
+    /// <see cref="IsHeld"/> stays true because the item is still not in the world, so
+    /// every existing "on the floor?" guard keeps meaning what it meant.
+    ///
+    /// Deactivating is also why a stowed torch goes dark and lights again when you take
+    /// it out. Override if an item should keep running inside the pack.
+    /// </summary>
+    public virtual void OnStowed()
+    {
+        stowed = true;
+        gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Out of a slot. Only wakes the object up: the held pose is applied by
+    /// <see cref="OnPickedUp"/> right after, so there is still exactly one place that
+    /// decides how a held item sits.
+    /// </summary>
+    public virtual void OnUnstowed()
+    {
+        stowed = false;
+        gameObject.SetActive(true);
+    }
+
     public virtual void OnDropped(Vector3 position, Quaternion rotation)
     {
         held = false;
+
+        // A slot is a place an item can leave from too, so undo the stow rather than
+        // leaving an inactive object lying invisibly on the floor.
+        stowed = false;
+        if (!gameObject.activeSelf) gameObject.SetActive(true);
 
         transform.SetParent(null, true);
         transform.position = position;

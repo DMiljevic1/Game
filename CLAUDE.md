@@ -135,6 +135,12 @@ aim is always authoritative. Otherwise everything within `range` is gathered wit
 | **Q** | drop what you are holding | `PlayerInteractor.dropKey` |
 | **T** | start / stop the generator | `Generator.powerKey` |
 | **X** | switch the torch on / off | `Flashlight.toggleKey` |
+| **1–4** | select a pack slot | `PlayerInventory.slotKeys` — **not** routed; see below |
+
+`PlayerInventory` reads 1–4 itself, and that is not a violation of the one-router rule: a slot is
+not something you aim at, so it is a player system like `PlayerMovement`, not an interactable. They
+are in this table so nothing else ever claims them — an interactable that declared `Alpha1` would
+fire alongside a slot swap.
 
 - `GetOptions` fills a list, so one object can offer several actions at once — the generator offers
   refuel (F) and start (T) together, so you never have to put the can down to switch it on.
@@ -172,6 +178,56 @@ aim is always authoritative. Otherwise everything within `range` is gathered wit
 - Anything interactable needs a collider, and colliders must be enabled to be looked at — doors are
   deliberately unhittable mid-swing for this reason.
 
+### Inventory — four slots on your back, one thing in your hands
+
+`PlayerInventory` on the Player, in the Lethal Company shape. It owns the four slots and the
+selection **and nothing else — the hands still belong to `PlayerInteractor`.** There is exactly one
+`carried` reference in the game and it is not in here.
+
+- **Nothing is ever cloned, destroyed or respawned to move an item.** Stowing is
+  `interactor.ConsumeCarried()` (which already meant "out of the hands without placing it") plus
+  `Carryable.OnStowed`, which just deactivates the GameObject. It is the same object with the same
+  script, value, name and state all the way through GROUND → HAND → SLOT → HAND → GROUND.
+- **`HeldFromSlot` is derived, never notified:** it is valid only while the hands still hold the very
+  item the pack handed over. So a Q drop, a sale, a death or a new pickup all sever it for free.
+  Do not replace this with a notification — a future item route would eventually forget to call it.
+- `Carryable.IsHeld` means "in the player's possession", hands **or** pack, so every existing
+  "still on the floor?" guard keeps working. `IsStowed` is the narrower question.
+- **The hands are never emptied to make room.** `PlayerInteractor.Carry` stows what you hold, and if
+  the pack is full too it *refuses the pickup* — `CanPickUp` is the seam, and `PickUpRefusal` puts
+  the reason on the prompt, because being unable to pick something up with no explanation reads as
+  a bug. With no `PlayerInventory` wired, `Carry` drops what you hold exactly as it did before.
+- **Equip vacates the slot first.** That frees somewhere for whatever is already in the hands, which
+  is what lets a swap work with all four slots full and nothing hitting the floor.
+- **Unequipping and dropping are two different actions, and no number key ever becomes a drop.**
+  Selecting an *empty* slot unequips: the held item goes back to **the slot it came from** if it has
+  one (pressing 2 while holding what came out of 1 puts it back in 1 and leaves 2 empty), and
+  otherwise — it came off the ground — it is stored in the empty slot just selected. That second
+  case is how something gets *deliberately* stored rather than only by being bumped out of the hands
+  by the next pickup. Once an item is in the pack it stays in the player's possession until they
+  press **Q**; `PlayerInventory` must never call `DropCarried`.
+- **Auto-stow prefers the slot the item came from** when that slot is still free, and only then the
+  first empty one: taking the watch out of slot 3 and picking something up should not shuffle the
+  watch to slot 1.
+- **`Carryable.canBeStoredInInventory` is the whole "too big for the pack" rule** — per item, never
+  by name. A cleared one can be picked up and carried normally but can never occupy a slot, so
+  `CanStowCarried` is false, `CanPickUp` is false, and you cannot pick anything else up until you
+  put it down. A number key with one in your hands does nothing at all: it is not swapped away and
+  it is *not* dropped for you. `ValuableSize.Large` clears it in `ApplySizePreset`, so the
+  television is automatically hands-only — retune that with the Large movement numbers, not
+  separately. `Custom` leaves it as authored.
+- `PlayerInteractor.PickUpRefusalReason` distinguishes the two refusals ("hands and pack full" vs
+  "put the old CRT television down first") because they need different actions from the player.
+  `Carryable.PickUpRefusal` puts it on the prompt for every item for free.
+- A stowed torch goes dark and lights again when taken out, because stowing deactivates the object.
+  Override `OnStowed`/`OnUnstowed` for an item that should keep running in the pack.
+- Dying still drops only what is **in the hands**; slots survive a death. Change that in
+  `PlayerInteractor.DropCarriedOnDeath`, not here.
+- `InventoryHud` on the Player only *reads* the pack — no slot, key or swap logic lives in the UI,
+  the same rule `MoneyHud` follows. Being immediate-mode it is redrawn every frame, so it cannot go
+  stale. `Hud.BottomBarHeight` is the one number reserving the bottom strip; the interactor's
+  "Carrying:" line sits above it, so the two cannot drift into each other.
+
 ### Economy as of now
 
 Generator tank 100. A full night costs **75** fuel. A can holds **40**. So one can buys roughly half
@@ -194,24 +250,26 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
 
 | State | Does | Leaves when |
 |---|---|---|
-| `Patrol` | Walks `patrolPoints` in order at `patrolSpeed`, waiting `patrolWaitTime` at each | any noise is heard |
+| `Patrol` | Roams the map at `patrolSpeed`, destinations chosen by `MonsterPatrol` | any noise is heard |
 | `Alerted` | Walks to the (blurred) noise position at `alertSpeed` | arrives → `Investigate`; louder/repeated noise → `Chase` |
-| `Investigate` | Stands and turns on the spot for `investigateDuration` | timer out → `Patrol` (agitation reset); new noise → `Alerted`/`Chase` |
+| `Investigate` | Stands and sweeps its look around for `investigateDuration` | timer out → `Patrol` (agitation reset); new noise → `Alerted`/`Chase` |
 | `Chase` | Same as `Alerted` but `chaseSpeed`, always re-targeting the **newest** noise | `agitation` decays below `chaseThreshold` → `Alerted` |
 
 - **`agitation`** is the aggression dial: each heard noise adds `agitationPerSound * (0.5 + clarity)`,
   it decays at `agitationDecayPerSecond`, and crossing `chaseThreshold` is what turns walking into
   running. Sounds close together stack; silence calms it down.
-- `patrolPoints` empty → it falls back to random wandering in `roamCenter`/`roamRadius`, so a
-  monster spawned with no route still behaves. `MonsterSpawner.patrolRoute` (the `PatrolRoute` root)
-  hands its children to every spawned monster, each starting at a different index.
 - Monsters must **never** decide safety by measuring distance themselves; they call
   `Generator.GetProtector` / `IsPointProtected`. `KeepOutOfSafeZone` runs on every heard position
   *and* every destination, so a noise made inside the light draws it to the boundary and no further.
   `Monster.Move` also re-checks after every move and pushes back out, so no collision slide or
   steering bug can ever put one inside the light.
-- Steering is direct with a `CharacterController` (flat level, slides off walls for free).
-  Switch to `NavMeshAgent` when a level has real geometry — `com.unity.ai.navigation` is installed.
+- **Moving is still the monster's own job; only the route is the NavMesh's.** `NavPathFollower`
+  (a plain class, one per monster) turns "go there" into "steer at this corner", and `Monster.Move`
+  still drives the `CharacterController` — so gravity, the safe-zone push-out and attack-by-touch
+  all stay in one place. There is deliberately **no `NavMeshAgent`**: an agent would own the
+  transform and fight all three. Used by pursuit as well as patrol, so chasing rounds corners too.
+  `NavPathFollower.Blocked` is the "you cannot get there from here" signal — it is true only when
+  both ends sampled onto the mesh and the route still came back incomplete.
 - Balance now: chase 3.6 vs player walk 5 / sprint 9 — always outrunnable, so death is a mistake,
   not a dice roll. 25 damage every 1.2s = 4 hits, ~4.8s of standing still.
 - `showDebug` (on by default) draws the hearing radius, the destination in the state's colour, the
@@ -223,9 +281,59 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
   then it swings open. It cannot reach a door while the generator runs — the whole house sits inside
   the radius — so "they can open doors" is really "once the light dies". `DoorInteraction.canBeForced`
   can be cleared for a door that should hold.
-- **Known limit:** steering is direct, so monsters navigate open ground and doorways but snag on
-  interior corners. Bake a NavMesh and swap to `NavMeshAgent` before relying on indoor pursuit.
 - **Known limit:** sound is not occluded. A noise through a wall carries as far as one in the open.
+- **Known limit:** only a *hunting* monster forces doors, so a patrolling one that routes through a
+  shut doorway walks into it, times out and picks somewhere else. Correct, but it costs a leg.
+
+### MonsterPatrol — where it goes when nothing has its attention
+
+`Assets/Scripts/MonsterPatrol.cs` is a component on the monster and **knows nothing about
+detection** — not hearing, not sight, not agitation, not the player. Hand it a position, get back a
+walkable point. That ignorance is the point: a sighted monster can drop the same component on and
+roam identically without either script sharing a line of the other's detection code. Detection
+always wins; `Monster` simply stops asking while it is alerted, investigating or chasing.
+
+- **It should read as "out walking", never as "waiting to be triggered".** Legs measure 18–68m
+  (`minTravelDistance` 16 is the floor that stops it dithering in one corner), and `pauseChance`
+  0.3 means most arrivals roll straight on. Measured over 25 legs: ~920m walked, ~12s paused.
+- `directionSpread` (130°, not 180°) is what makes a route look like a route — a new leg sets off
+  roughly onward rather than doubling back. Near the rim of `areaRadius` the basis flips inward so
+  it does not keep aiming off the edge of the world.
+- **A destination is only taken if `NavMesh.CalculatePath` returns `PathComplete`**, so it never
+  sets off somewhere it cannot reach. Each of `maxAttempts` relaxes the distance and the spread a
+  little, so a monster shut in a small room still finds somewhere legal instead of failing perfectly.
+- It also refuses anything inside `Generator.IsPointProtected`, and `Monster` re-checks the current
+  destination every frame in case the generator started mid-leg.
+- **A leg is abandoned three ways**, all in `Monster.PatrolLegLost`: the follower reports `Blocked`,
+  actual `controller.velocity` stays under 30% of `patrolSpeed` for `patrolStuckTime`, or the leg
+  outlasts `patrolSecondsPerMetre` × its length. Any of them picks somewhere else — nothing leans
+  on a wall for the rest of the night.
+- `anchors` (filled from `MonsterSpawner.patrolRoute`, i.e. the `PatrolRoute` root) are a **bias,
+  not a loop**: `anchorChance` 0.25 of legs head for one. `Monster.SetPatrolRoute`'s `startIndex`
+  argument no longer means anything and is kept only so the spawner needs no change.
+- **Nothing turns on the spot.** Facing follows travel and only travel; a patrol pause holds the
+  heading it arrived on. The one place a monster turns while standing is `Monster.Scan` during
+  `Investigate`, and that is a sweep — turn to a direction, hold `scanHoldTime`, choose another —
+  because a continuous spin reads as a bug rather than as searching.
+- With no NavMesh baked it logs a warning once and falls back to the old straight-line circle, so
+  a scene without a bake degrades rather than freezing.
+
+### The NavMesh
+
+`NavMeshSurface` on **`Systems`** (in the environment builder's `Keep` set), baked to
+`Assets/Scenes/SampleSceneNavigation/NavMesh-Systems.asset`. Collect **All**, geometry **Physics
+Colliders** (canopies and bushes are render-only, so they correctly do not block), voxel size 0.1
+because the door openings are only 1.2 wide.
+
+- `NavMeshModifier` with `ignoreFromBuild` marks everything that must **not** carve a hole: `Player`,
+  `Monster_Test`, and the carryable roots `FuelCans` / `Flashlight` / `Valuables`. A door hinge
+  carries one too — a mesh baked around a shut door would leave every room an unreachable island.
+- **`Lab ▸ Environment ▸ Build Prototype Environment` re-bakes at the end** (`RebakeNavMesh`), so a
+  rebuilt forest does not leave monsters routing around trees that are gone. `House` is *not* in the
+  `Keep` set, so the doors' modifiers are re-added by `PrototypeEnvironmentBuilder.Door`.
+- Anything else that changes level collision needs a re-bake. Verify with coverage and a
+  `CalculatePath` probe (the whole 110×110 ground samples, and every house room is `PathComplete`
+  from outside) rather than by eye.
 
 ### Sound — how anything gets noticed
 
@@ -309,11 +417,11 @@ Price is only half a loot item; the other half is what carrying it costs you.
   Retune a category there and every item in it follows. `Custom` opts an item out and uses the
   multipliers as authored.
 
-| Size | Walk | Sprint | Items now |
-|---|---|---|---|
-| `Small` | 5.0 (×1) | 9.0 (×1) | old radio $40, camera $60, old clock $75 |
-| `Medium` | 4.5 (×0.9) | 8.1 (×0.9) | laptop $150 |
-| `Large` | 3.1 (×0.62) | **none** | old CRT television $300 |
+| Size | Walk | Sprint | Pack | Items now |
+|---|---|---|---|---|
+| `Small` | 5.0 (×1) | 9.0 (×1) | yes | old radio $40, camera $60, old clock $75 |
+| `Medium` | 4.5 (×0.9) | 8.1 (×0.9) | yes | laptop $150 |
+| `Large` | 3.1 (×0.62) | **none** | **no** | old CRT television $300 |
 
 - The Large numbers are chosen against the monster: chase speed is **3.6**, so 3.1 means the
   television is the one thing you cannot outrun. That is the risk/reward, not a balance accident —
@@ -339,6 +447,11 @@ Row numbers are claimed and must not collide. **Left column** (`Hud.Row`): **0-1
 **Right column** (`Hud.RowRight`):
 **0** money balance, **1** the `+$100` change popup, both drawn by `MoneyHud`. The two columns are
 numbered separately, so they cannot collide. Claim the next free number for a new readout.
+
+The **bottom** of the screen is not row-numbered: `Hud.BottomBarHeight` reserves a strip for the
+inventory bar (`InventoryHud`), and anything else drawing down there keeps clear above it, as the
+interactor's "Carrying:" line does. `Hud.Box` and `Hud.Frame` draw the panels — one shared 1×1
+texture, so a panel costs no allocation per frame.
 
 ## C# conventions
 

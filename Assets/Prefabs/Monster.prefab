@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 8140820039167747808}
   - component: {fileID: 1159904882315603745}
   - component: {fileID: 8320068727892849733}
+  - component: {fileID: 1225062853180778507}
   m_Layer: 0
   m_Name: Monster
   m_TagString: Untagged
@@ -72,18 +73,60 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6d5b400b52bdc064682dd7145a46dbdf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Monster
-  roamSpeed: 2.2
+  hearingRadius: 30
+  hearingSensitivity: 1
+  positionError: 3
+  patrolSpeed: 1.6
+  alertSpeed: 2.6
   chaseSpeed: 4
   turnSpeed: 6
   gravity: -9.81
-  detectRadius: 32
+  arriveDistance: 1.2
+  patrolPoints: []
+  patrolStuckTime: 1.5
+  patrolSecondsPerMetre: 1.6
+  roamCenter: {x: 0, y: 0, z: 0}
+  roamRadius: 45
+  investigateDuration: 6
+  scanTurnSpeed: 70
+  scanHoldTime: 0.9
+  scanSweepAngle: 110
+  agitationPerSound: 1
+  agitationDecayPerSecond: 0.45
+  chaseThreshold: 2.5
+  maxAgitation: 5
   attackRange: 1.7
   attackDamage: 25
   attackInterval: 1.2
   standOffPadding: 1.5
-  roamCenter: {x: 0, y: 0, z: 0}
-  roamRadius: 45
-  roamArrivalDistance: 2.5
+  doorProbeDistance: 1.6
+  doorForceTime: 1.4
+  showDebug: 1
+--- !u!114 &1225062853180778507
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2325199344182345962}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1dc4b96bad736f74f9759029e6772aa0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MonsterPatrol
+  areaCenter: {x: 0, y: 0, z: 0}
+  areaRadius: 45
+  minTravelDistance: 16
+  maxTravelDistance: 45
+  directionSpread: 130
+  sampleRadius: 5
+  maxAttempts: 20
+  pauseChance: 0.3
+  minPauseTime: 0.4
+  maxPauseTime: 2.2
+  anchors: []
+  anchorChance: 0.25
+  showDebug: 1
 --- !u!1 &7998844925386988916
 GameObject:
   m_ObjectHideFlags: 0

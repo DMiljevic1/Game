@@ -15548,6 +15548,7 @@ GameObject:
   - component: {fileID: 155612229}
   - component: {fileID: 155612230}
   - component: {fileID: 155612231}
+  - component: {fileID: 155612232}
   m_Layer: 0
   m_Name: Systems
   m_TagString: Untagged
@@ -15664,6 +15665,38 @@ MonoBehaviour:
   maxListed: 6
   firstRow: 5
   noiseFlashTime: 1.5
+--- !u!114 &155612232
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 155612225}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a5ac11cc976e418e8d13136b07e1f52, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshSurface
+  m_SerializedVersion: 0
+  m_AgentTypeID: 0
+  m_CollectObjects: 0
+  m_Size: {x: 10, y: 10, z: 10}
+  m_Center: {x: 0, y: 2, z: 0}
+  m_LayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_UseGeometry: 1
+  m_DefaultArea: 0
+  m_GenerateLinks: 0
+  m_IgnoreNavMeshAgent: 1
+  m_IgnoreNavMeshObstacle: 1
+  m_OverrideTileSize: 0
+  m_TileSize: 256
+  m_OverrideVoxelSize: 1
+  m_VoxelSize: 0.1
+  m_MinRegionArea: 2
+  m_NavMeshData: {fileID: 23800000, guid: 9887c737bed8124419f19cf071c68716, type: 2}
+  m_BuildHeightMesh: 0
 --- !u!1 &156994015
 GameObject:
   m_ObjectHideFlags: 0
@@ -20029,6 +20062,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0.05, y: -0.12, z: 0.24}
   heldEuler: {x: 2.73, y: 19.82, z: 352.48}
   value: 75
@@ -20549,6 +20583,7 @@ GameObject:
   - component: {fileID: 192972624}
   - component: {fileID: 192972623}
   - component: {fileID: 192972622}
+  - component: {fileID: 192972625}
   m_Layer: 0
   m_Name: Flashlight
   m_TagString: Untagged
@@ -20573,6 +20608,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0.1, y: -0.1, z: 0.15}
   heldEuler: {x: 2.72831, y: 19.820587, z: 352.47675}
   toggleKey: 120
@@ -20624,6 +20660,26 @@ Transform:
   - {fileID: 681542718}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &192972625
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 192972621}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &193303761
 GameObject:
   m_ObjectHideFlags: 0
@@ -21300,6 +21356,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0, y: 0, z: 0}
   heldEuler: {x: 0, y: 0, z: 0}
   fuel: 40
@@ -53907,6 +53964,7 @@ GameObject:
   m_Component:
   - component: {fileID: 508667354}
   - component: {fileID: 508667355}
+  - component: {fileID: 508667356}
   m_Layer: 0
   m_Name: BedroomDoor_Hinge
   m_TagString: Untagged
@@ -53948,6 +54006,26 @@ MonoBehaviour:
   restAngleThreshold: 2
   canBeForced: 1
   noiseRadius: 14
+--- !u!114 &508667356
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 508667353}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &510238781
 GameObject:
   m_ObjectHideFlags: 0
@@ -55602,6 +55680,7 @@ GameObject:
   m_Component:
   - component: {fileID: 530827746}
   - component: {fileID: 530827747}
+  - component: {fileID: 530827748}
   m_Layer: 0
   m_Name: LivingDoor_Hinge
   m_TagString: Untagged
@@ -55643,6 +55722,26 @@ MonoBehaviour:
   restAngleThreshold: 2
   canBeForced: 1
   noiseRadius: 14
+--- !u!114 &530827748
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 530827745}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &531334599
 GameObject:
   m_ObjectHideFlags: 0
@@ -67394,6 +67493,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 630648408}
+  - component: {fileID: 630648409}
   m_Layer: 0
   m_Name: Valuables
   m_TagString: Untagged
@@ -67421,6 +67521,26 @@ Transform:
   - {fileID: 1141779429}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &630648409
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 630648407}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &631489700
 GameObject:
   m_ObjectHideFlags: 0
@@ -89946,6 +90066,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0, y: 0, z: 0}
   heldEuler: {x: 0, y: 0, z: 0}
   fuel: 40
@@ -110892,6 +111013,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0, y: 0, z: 0}
   heldEuler: {x: 0, y: 0, z: 0}
   fuel: 40
@@ -119595,6 +119717,7 @@ MonoBehaviour:
   carryMoveMultiplier: 0.62
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 0
+  canBeStoredInInventory: 0
   heldPosition: {x: 0.1, y: -0.3, z: 0.62}
   heldEuler: {x: 2.73, y: 19.82, z: 352.48}
   value: 300
@@ -138938,6 +139061,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0.05, y: -0.11, z: 0.22}
   heldEuler: {x: 2.73, y: 19.82, z: 352.48}
   value: 60
@@ -143073,6 +143197,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0, y: 0, z: 0}
   heldEuler: {x: 0, y: 0, z: 0}
   fuel: 40
@@ -153263,6 +153388,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1446392777}
   - component: {fileID: 1446392778}
+  - component: {fileID: 1446392779}
   m_Layer: 0
   m_Name: FrontDoor_Hinge
   m_TagString: Untagged
@@ -153304,6 +153430,26 @@ MonoBehaviour:
   restAngleThreshold: 2
   canBeForced: 1
   noiseRadius: 14
+--- !u!114 &1446392779
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1446392776}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &1447463842
 GameObject:
   m_ObjectHideFlags: 0
@@ -154412,6 +154558,7 @@ MonoBehaviour:
   carryMoveMultiplier: 0.9
   carrySprintMultiplier: 0.9
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0.06, y: -0.16, z: 0.28}
   heldEuler: {x: 2.72831, y: 19.820587, z: 352.47675}
   value: 150
@@ -192811,6 +192958,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1816865777}
+  - component: {fileID: 1816865778}
   m_Layer: 0
   m_Name: FuelCans
   m_TagString: Untagged
@@ -192837,6 +192985,26 @@ Transform:
   - {fileID: 850897702}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1816865778
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1816865776}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &1817008686
 GameObject:
   m_ObjectHideFlags: 0
@@ -202786,6 +202954,7 @@ MonoBehaviour:
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  canBeStoredInInventory: 1
   heldPosition: {x: 0.05, y: -0.13, z: 0.24}
   heldEuler: {x: 2.73, y: 19.82, z: 352.48}
   value: 40
@@ -214539,6 +214708,9 @@ GameObject:
   - component: {fileID: 2004785709}
   - component: {fileID: 2004785711}
   - component: {fileID: 2004785710}
+  - component: {fileID: 2004785712}
+  - component: {fileID: 2004785714}
+  - component: {fileID: 2004785713}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -214709,6 +214881,7 @@ MonoBehaviour:
   carrySocket: {fileID: 78706524}
   vitals: {fileID: 2004785708}
   movement: {fileID: 2004785701}
+  inventory: {fileID: 2004785714}
   dropClearance: 0.05
   interactNoiseRadius: 12
 --- !u!114 &2004785708
@@ -214871,6 +215044,62 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+--- !u!114 &2004785712
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2004785700}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
+--- !u!114 &2004785713
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2004785700}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4c80e3ddbf632bb43b1006be7c753133, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InventoryHud
+  inventory: {fileID: 2004785714}
+  interactor: {fileID: 2004785707}
+  slotAspect: 1.45
+  emptyBackground: {r: 0, g: 0, b: 0, a: 0.45}
+  filledBackground: {r: 0.16, g: 0.15, b: 0.11, a: 0.7}
+  selectedBackground: {r: 1, g: 0.92, b: 0.6, a: 0.22}
+  border: {r: 1, g: 1, b: 1, a: 0.3}
+  selectedBorder: {r: 1, g: 0.92, b: 0.6, a: 0.95}
+  itemText: {r: 1, g: 0.97, b: 0.85, a: 1}
+  emptyText: {r: 1, g: 1, b: 1, a: 0.28}
+--- !u!114 &2004785714
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2004785700}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7033de50b7cb68741aadeb9061c9002e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInventory
+  slotKeys: 31000000320000003300000034000000
+  interactor: {fileID: 2004785707}
 --- !u!1 &2005075452
 GameObject:
   m_ObjectHideFlags: 0
@@ -226298,6 +226527,50 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: areaCenter.x
+      value: 8.8
+      objectReference: {fileID: 0}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: areaCenter.z
+      value: -7.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: anchors.Array.size
+      value: 8
+      objectReference: {fileID: 0}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[0]'
+      value: 
+      objectReference: {fileID: 1067864744}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[1]'
+      value: 
+      objectReference: {fileID: 117547585}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[2]'
+      value: 
+      objectReference: {fileID: 740278428}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[3]'
+      value: 
+      objectReference: {fileID: 504234784}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[4]'
+      value: 
+      objectReference: {fileID: 970997753}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[5]'
+      value: 
+      objectReference: {fileID: 664896139}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[6]'
+      value: 
+      objectReference: {fileID: 1153356711}
+    - target: {fileID: 1225062853180778507, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      propertyPath: 'anchors.Array.data[7]'
+      value: 
+      objectReference: {fileID: 1109174970}
     - target: {fileID: 2325199344182345962, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
       propertyPath: m_Name
       value: Monster_Test
@@ -226389,8 +226662,36 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 2325199344182345962, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 2112648818}
   m_SourcePrefab: {fileID: 100100000, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+--- !u!1 &2112648817 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2325199344182345962, guid: 514d821a8b6f90f46802991e036461d3, type: 3}
+  m_PrefabInstance: {fileID: 2112648816}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &2112648818
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2112648817}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e3fdca004f2d45fe8abbed571a8abd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshModifier
+  m_SerializedVersion: 0
+  m_OverrideArea: 0
+  m_Area: 0
+  m_OverrideGenerateLinks: 0
+  m_GenerateLinks: 0
+  m_IgnoreFromBuild: 1
+  m_ApplyToChildren: 1
+  m_AffectedAgents: ffffffff
 --- !u!1 &2113358281
 GameObject:
   m_ObjectHideFlags: 0
