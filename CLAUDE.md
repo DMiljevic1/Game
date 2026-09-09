@@ -33,13 +33,13 @@ The `unity-mcp` tools drive the **live Editor**. That is the primary way to chan
 
 ## Scene conventions (SampleScene)
 
-- Roots: `Directional Light`, `Global Volume`, `Player` (CharacterController + `PlayerMovement`, child `Main Camera` + `MouseLook`), `Systems`, `Generator`, `FuelCans`, `PlayerRespawn`, `Ground`, `Boundary`, `House`, `Forest`, `Props`.
+- Roots: `Directional Light`, `Global Volume`, `Player` (CharacterController + `PlayerMovement`, child `Main Camera` + `MouseLook`), `Systems`, `Generator`, `FuelCans`, `PlayerRespawn`, `Ground`, `Boundary`, `House`, `Forest`, `Props`, `SellStation`, `Store`, `LootSpawnPoints`.
 - **The environment is generated, not hand-placed.** `Assets/Editor/PrototypeEnvironmentBuilder.cs`
   (menu **Lab ▸ Environment ▸ Build Prototype Environment**) rebuilds `Ground`, `Boundary`, `House`,
-  `Forest` and `Props` from scratch out of primitives. Change the level by editing that script and
+  `Forest`, `Props` and `LootSpawnPoints` from scratch out of primitives. Change the level by editing that script and
   re-running it, not by dragging cubes — a re-run destroys every root outside its `Keep` set
   (`Player`, `Systems`, `Directional Light`, `Global Volume`, `Generator`, `PlayerRespawn`, `FuelCans`,
-  `Flashlight`, `SellStation`, `Valuables`),
+  `Flashlight`, `SellStation`, `Store`, `Valuables`),
   so anything hand-placed elsewhere is lost. It is deterministic (`Random.InitState`), so the same
   seed gives the same forest.
 - `House` is one abandoned building centred on the origin, 14 × 11, split by a south→north hallway:
@@ -130,7 +130,7 @@ aim is always authoritative. Otherwise everything within `range` is gathered wit
 
 | Key | Action | Declared by |
 |---|---|---|
-| **E** | open / close doors, **and** sell at the counter | `DoorInteraction.useKey`, `SellStation.sellKey` |
+| **E** | open / close doors, sell at the counter, **and** open / close the store | `DoorInteraction.useKey`, `SellStation.sellKey`, `Store.browseKey` |
 | **F** | pick up an item, and pour fuel in | `Carryable.pickUpKey`, `Generator.refuelKey` |
 | **Q** | drop what you are holding | `PlayerInteractor.dropKey` |
 | **T** | start / stop the generator | `Generator.powerKey` |
@@ -430,10 +430,113 @@ Price is only half a loot item; the other half is what carrying it costs you.
   controller's *actual* speed, so carrying the television is also **quieter** than running; and
   `PlayerInteractor`'s carrying line says `(heavy)` / `(too heavy to run)`, because being slow with
   no explanation reads as a bug.
-- The five items live under the `Valuables` root in `SampleScene`, built from primitives like the
-  rest of the prototype. `Valuables` is in the environment builder's `Keep` set, so a re-run of
-  **Lab ▸ Environment ▸ Build Prototype Environment** leaves them alone. **A new valuable belongs
-  under that root** — a loose one at scene root, or anything under `Props`, is destroyed by a rebuild.
+- The five items are **prefabs** in `Assets/Prefabs/Loot/`, built from primitives like the rest of
+  the prototype. They are not placed in the scene: `LootSpawner` instantiates them at run time under
+  the `Valuables` root, which is in the environment builder's `Keep` set and is empty in the Editor.
+
+#### The store — money back into equipment
+
+`Store` on the `Store` root (a counter in the house **Entrance**, against the south wall between the
+doormat and the shoe rack) is the mirror image of `SellStation` and follows all of its rules: an
+ordinary `IInteractable` declaring **E**, the `Wallet` still the single authority on money, and a
+`HasAuthority` seam for netcode. `StoreHud` beside it only *reads* — no price, stock or arithmetic
+lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
+
+- **A new purchasable is a prefab and one number.** Add a `StoreItem` to `stock`; there is no
+  per-item script, exactly as a new `Valuable` is a prefab and two numbers.
+- **The bought item reaches the player through `PlayerInteractor.Carry`** — the one existing route
+  into their possession. So it already stows what they were holding into a free slot, and already
+  refuses when hands *and* pack are full. `Store` adds no inventory API and holds no item reference.
+- **Money is spent only after the item is certain to have somewhere to go** (`interactor.CanPickUp`
+  is checked first), so a refused pickup can never leave the player poorer with nothing to show.
+  `Wallet.Add(-price)` does the paying, and `MoneyHud` already renders the negative delta.
+- **Nothing sold here can ever be found as loot.** That is not a flag: `LootSpawner` only ever
+  instantiates from `lootPrefabs`, which holds `Valuable`s, and store goods are neither `Valuable`s
+  nor in that list. Keep it that way — the two catalogues must not be merged.
+- **Buying uses the mouse, so the store is modal.** `Open` unlocks the cursor and switches off
+  `MouseLook` and `PlayerMovement`, and `Close` gives back **only** what it took (a script already
+  disabled is left alone). Neither of those scripts knows the store exists. `Update` also closes the
+  panel if the browser stops existing — a cursor locked away by a vanished shop is the worst thing
+  to leave behind. **E** or **Escape** closes it.
+- The counter's `Shop_Backboard` reaches **y 2.6** for the `Counter_Backboard` reason: a waist-high
+  cabinet alone sends the aim ray over the top into the wall. Don't shorten it.
+- Purchases emit `Noise` themselves (8 m). The interactor's 12 m noise only covers keys *it* routed,
+  and a button click is not one.
+- The panel draws centred, so it claims no `Hud.Row` / `Hud.RowRight` number. `Hud.Button` is the
+  shared style for its buttons — the only place in the game the mouse is used.
+
+**Stock as of now** (prefabs in `Assets/Prefabs/Store/`, built from primitives like everything else):
+
+| Item | Price | What it is |
+|---|---|---|
+| Flashlight | 60 | The existing `Flashlight`: beam range 32, spot 42°, intensity 70 |
+| Better Flashlight | 180 | The same script, stronger beam: range **55**, spot **58°**, intensity **160**, whiter |
+| Shovel | 90 | A plain `Carryable`. No behaviour yet — the gameplay comes later |
+
+- **The torch is store-only and no longer lies on the house floor.** The `Flashlight` scene root was
+  removed when the store was added; buying one is how a run gets a light. Don't re-place one by hand.
+- All three set `NavMeshModifier.ignoreFromBuild`, like every other carryable, so a dropped one never
+  carves a hole in the mesh.
+- Prices sit against an average haul of ~$501 a run: the basic torch is a first-night purchase, the
+  better one costs most of a good run. Retune them against that number, not on their own.
+
+#### Loot spawning — rarity is derived, position is shuffled
+
+`LootSpawner` on `Systems` rolls a run's loot in `Start`, `HasAuthority`-shaped like `MonsterSpawner`.
+It owns two decisions and nothing else. **Never place a valuable in the scene by hand** — add a
+prefab to `lootPrefabs` instead, or nothing will know it exists.
+
+- **There is no rarity number anywhere, and there must never be one.** `SpawnWeight` derives it from
+  the item's own `value` and `size`: `(commonValue / value) ^ valueExponent`, times `mediumSizeWeight`
+  (0.7) or `largeSizeWeight` (0.45). So a new valuable is still *a new prefab and two numbers*, and
+  **repricing an item automatically re-rarities it** — never tune price and frequency apart.
+- `minimumWeight` (0.01) is a floor, so nothing can ever become unfindable however dear it gets.
+- `MaxPerRun` is derived from size too (Small 3 / Medium 2 / Large 1), so the cheap stuff cannot
+  flood the map and there is never more than one television.
+- **Measured over 20,000 simulated runs** with the defaults (`commonValue` 40, exponent 1.4,
+  6–9 items a run, averaging 7.5):
+
+  | item | price | size | weight | avg/run | runs containing it |
+  |---|---|---|---|---|---|
+  | old radio | 40 | Small | 1.000 | 2.75 | 99.5% |
+  | camera | 60 | Small | 0.567 | 2.25 | 96.6% |
+  | old clock | 75 | Small | 0.415 | 1.86 | 92.2% |
+  | laptop | 150 | Medium | 0.110 | 0.53 | **43.3%** |
+  | old CRT television | 300 | Large | 0.027 | 0.13 | **12.8%** |
+
+  So a television turns up about **one run in eight** and a laptop in **two runs in five**, and the
+  average haul lying in the level is **$501**. Note the caps compress the three cheap items towards
+  each other — the raw curve is 47/27/20 per draw, but at 7.5 draws against a cap of 3 they realise
+  closer to 37/30/25. That is the caps doing their job, not the curve misfiring.
+- **`TryResolveSurface` is the single definition of a valid spot** and the editor tool calls this
+  same runtime method rather than reimplementing it, so what is authored and what is used cannot
+  drift. It raycasts down, rejects faces steeper than `maxSurfaceSlope`, then overlap-boxes
+  `fitProbeSize` (sized for the television) above the hit. **The box is what catches a point inside
+  a wall** — a downward ray that *starts* inside a wall collider passes straight through it and finds
+  the floor beneath, so the ray alone would happily bury an item in masonry.
+- Items are then lifted so their **renderer bounds' bottom** sits on the surface: a pivot is not
+  always a base, and the fuel cans and torch are added to the taken-spots list so nothing spawns
+  inside them.
+- Randomisation is a real **Fisher-Yates shuffle** of the points, not a random start index into a
+  fixed order, and `minItemSeparation` (3m) keeps two pieces out of the same spot. `useFixedSeed` is
+  off by default; when on it saves and restores `Random.state` so it cannot knock `MonsterSpawner`
+  off its own stream.
+- `Log spawn odds` on the component's context menu prints the table, so the curve is never a black box.
+
+`LootSpawnPoint` is a bare marker — no item, no odds, no state. `allowLargeItems` is the one dial
+(cleared above a 1.0m surface, so a television is never balanced on a shelf). `Assets/Editor/LootSpawnPointBuilder.cs`
+(**Lab ▸ Loot ▸ Rebuild Loot Spawn Points**) generates the `LootSpawnPoints` root and
+**`Build Prototype Environment` re-runs it**, so a rebuilt house never leaves points in its new walls.
+
+- It samples a jittered grid over the whole house footprint plus two rings (yard 9–20m, field
+  20–34m) and keeps whatever survives the probe. **It deliberately does not describe the rooms** —
+  the probe rejects walls, partitions and furniture on its own, so what remains is exactly the
+  walkable floor and the tops of the furniture.
+- **Each region has its own cap.** A single shared budget is spent by whichever region is sampled
+  first, which left the far field with zero points — and the far field is most of the reason to
+  leave the house.
+- Expanding means adding a region there, or dropping a `LootSpawnPoint` in by hand: the spawner
+  takes every one it can find, wherever it is parented.
 
 ### On-screen text
 

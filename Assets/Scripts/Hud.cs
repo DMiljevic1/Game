@@ -16,6 +16,7 @@ public static class Hud
     private static GUIStyle centered;
     private static GUIStyle slotLabel;
     private static GUIStyle slotKey;
+    private static GUIStyle button;
     private static Texture2D pixel;
     private static int builtForHeight = -1;
 
@@ -29,6 +30,10 @@ public static class Hud
 
     /// <summary>The key badge in the corner of an inventory slot.</summary>
     public static GUIStyle SlotKey { get { Build(); return slotKey; } }
+
+    /// <summary>A clickable button, scaled like the rest of the HUD. The only place in
+    /// the game the mouse is used, so it needs to be the size of a real target.</summary>
+    public static GUIStyle Button { get { Build(); return button; } }
 
     /// <summary>Height of one readout line, for stacking rows down the corner.</summary>
     public static float LineHeight { get { Build(); return readout.fontSize * 1.5f; } }
@@ -75,6 +80,10 @@ public static class Hud
         slotKey = new GUIStyle(slotLabel);
         slotKey.alignment = TextAnchor.UpperLeft;
         slotKey.wordWrap = false;
+
+        button = new GUIStyle(GUI.skin.button);
+        button.fontSize = readoutSize;
+        button.fontStyle = FontStyle.Bold;
     }
 
     /// <summary>

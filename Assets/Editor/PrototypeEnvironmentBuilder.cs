@@ -43,7 +43,7 @@ public static class PrototypeEnvironmentBuilder
     {
         "Player", "Systems", "Directional Light", "Global Volume",
         "Generator", "PlayerRespawn", "FuelCans", "Flashlight",
-        "SellStation", "Valuables"
+        "SellStation", "Store", "Valuables"
     };
 
     // ------------------------------------------------------------- materials
@@ -92,6 +92,10 @@ public static class PrototypeEnvironmentBuilder
         BuildForest();
         BuildProps();
 
+        // After every collider exists and before anything reads the level: loot points are
+        // probed against real geometry, so a rebuilt house must not keep the old ones.
+        LootSpawnPointBuilder.Build();
+
         PlaceGameplayObjects(player, systems, generator, sunGo, houseLights);
         ApplyAtmosphere();
         RebakeNavMesh(systems);
@@ -100,8 +104,8 @@ public static class PrototypeEnvironmentBuilder
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());
         Undo.CollapseUndoOperations(group);
 
-        Debug.Log("Prototype environment rebuilt: Ground, Boundary, House, Forest, Props. " +
-                  "Player, Systems, Generator and FuelCans were kept and repositioned.");
+        Debug.Log("Prototype environment rebuilt: Ground, Boundary, House, Forest, Props, " +
+                  "LootSpawnPoints. Player, Systems, Generator and FuelCans were kept and repositioned.");
     }
 
     // ------------------------------------------------------------------ util
@@ -501,15 +505,19 @@ public static class PrototypeEnvironmentBuilder
         List<Light> lights = new List<Light>();
 
         lights.Add(Lamp("Porch_Lamp", new Vector3(4.7f, 2.55f, -6.3f), 3.4f, 11f, new Color(1f, 0.72f, 0.40f)));
-        lights.Add(Lamp("Hall_Lamp", new Vector3(0.3f, 2.65f, -1.2f), 2.6f, 9f, new Color(1f, 0.74f, 0.44f)));
-        lights.Add(Lamp("Kitchen_Lamp", new Vector3(4.3f, 2.65f, 2.0f), 2.0f, 8f, new Color(1f, 0.76f, 0.48f)));
-        lights.Add(Lamp("Living_Lamp", new Vector3(-4.0f, 2.65f, -2.6f), 1.8f, 8f, new Color(1f, 0.70f, 0.40f)));
 
-        // The bedroom bulb is dead - one room the light never reaches.
-        Prim(t, "Bedroom_DeadBulb", PrimitiveType.Sphere, new Vector3(-4.0f, 2.62f, 3.0f),
-             new Vector3(0.16f, 0.16f, 0.16f), lampDead, default(Vector3), false);
-        Prim(t, "Bedroom_DeadFlex", PrimitiveType.Cylinder, new Vector3(-4.0f, 2.86f, 3.0f),
-             new Vector3(0.02f, 0.16f, 0.02f), metalDark, default(Vector3), false);
+        // One lamp per room, ranged to reach that room's far corner - the living
+        // room and kitchen are ~6 x 6, so 10 covers them diagonally. Nowhere
+        // indoors should be flashlight-only while the generator runs.
+        lights.Add(Lamp("Hall_LampS", new Vector3(0.3f, 2.65f, -2.6f), 2.6f, 9f, new Color(1f, 0.74f, 0.44f)));
+        lights.Add(Lamp("Hall_LampN", new Vector3(0.3f, 2.65f, 2.8f), 2.6f, 9f, new Color(1f, 0.74f, 0.44f)));
+        lights.Add(Lamp("Entrance_Lamp", new Vector3(4.3f, 2.65f, -3.6f), 3.0f, 10f, new Color(1f, 0.74f, 0.44f)));
+        lights.Add(Lamp("Kitchen_Lamp", new Vector3(4.3f, 2.65f, 2.0f), 3.0f, 10f, new Color(1f, 0.76f, 0.48f)));
+        lights.Add(Lamp("Living_Lamp", new Vector3(-4.0f, 2.65f, -2.6f), 3.0f, 10f, new Color(1f, 0.70f, 0.40f)));
+
+        // The bedroom is now the dimmest room rather than the dead one, so it
+        // still reads as the gloomy corner without being unplayable.
+        lights.Add(Lamp("Bedroom_Lamp", new Vector3(-4.0f, 2.65f, 3.0f), 2.2f, 8f, new Color(1f, 0.68f, 0.38f)));
 
         return lights;
 
