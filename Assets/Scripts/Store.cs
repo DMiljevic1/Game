@@ -21,6 +21,27 @@ public class StoreItem
     [Tooltip("One short line under the name. Purely descriptive.")]
     public string note = "";
 
+    // Looked up once: the price is read every frame the panel is open.
+    [System.NonSerialized] private IStorePriced pricer;
+    [System.NonSerialized] private bool pricerLooked;
+
+    /// <summary>
+    /// What this costs right now. <see cref="price"/> unless the prefab prices itself, as
+    /// Adrenaline does. Everything that shows or charges a price reads this, never the field.
+    /// </summary>
+    public int CurrentPrice
+    {
+        get
+        {
+            if (!pricerLooked)
+            {
+                pricer = prefab != null ? prefab.GetComponent<IStorePriced>() : null;
+                pricerLooked = true;
+            }
+            return pricer != null ? pricer.StorePrice(price) : price;
+        }
+    }
+
     /// <summary>The name to print, taken from the prefab when not overridden.</summary>
     public string Label
     {
@@ -33,6 +54,17 @@ public class StoreItem
             return c != null ? c.itemName : prefab.name;
         }
     }
+}
+
+/// <summary>
+/// A store good whose price is not a fixed number -- Adrenaline costs more with every
+/// revive. Put it on the prefab; the store asks it instead of using the listed price.
+/// It is still one number on the stock list, just one the item works out itself.
+/// </summary>
+public interface IStorePriced
+{
+    /// <summary>The price to show and charge now. <paramref name="listedPrice"/> is the stock entry's own.</summary>
+    int StorePrice(int listedPrice);
 }
 
 /// <summary>Why a purchase did or did not happen. The HUD turns this into a sentence.</summary>
@@ -115,7 +147,7 @@ public class Store : MonoBehaviour, IInteractable
     private float messageEndsAt = -1f;
     private float flashEndsAt = -1f;
 
-    // Authority seam, as with TimeOfDay, Generator, Wallet and LootSpawner.
+    // Authority seam, as with Generator, Wallet and LootSpawner.
     protected virtual bool HasAuthority { get { return true; } }
 
     /// <summary>True while the panel is up. The HUD draws only then.</summary>
@@ -252,7 +284,7 @@ public class Store : MonoBehaviour, IInteractable
         if (item == null) return 0;
 
         int have = wallet != null ? wallet.Money : 0;
-        return Mathf.Max(0, item.price - have);
+        return Mathf.Max(0, item.CurrentPrice - have);
     }
 
     /// <summary>
@@ -270,6 +302,10 @@ public class Store : MonoBehaviour, IInteractable
         {
             return Report(StoreResult.Unavailable, "Out of stock.");
         }
+
+        // Read once, before anything spawns: a self-pricing item (Adrenaline) is dearer the
+        // moment it exists, and the player must pay what the panel said, not the next price.
+        int price = item.CurrentPrice;
 
         int owed = Shortfall(item);
         if (owed > 0)
@@ -296,7 +332,7 @@ public class Store : MonoBehaviour, IInteractable
             return Report(StoreResult.Unavailable, "Out of stock.");
         }
 
-        wallet.Add(-item.price);
+        wallet.Add(-price);
         interactor.Carry(carryable);
 
         // Working the counter is audible, on the same footing as every other interaction --
@@ -304,7 +340,7 @@ public class Store : MonoBehaviour, IInteractable
         Noise.Emit(transform.position, purchaseNoiseRadius, gameObject);
 
         flashEndsAt = Time.time + flashSeconds;
-        OnBought(item.Label, item.price);
+        OnBought(item.Label, price);
 
         return Report(StoreResult.Bought, "Bought " + item.Label + ".");
     }

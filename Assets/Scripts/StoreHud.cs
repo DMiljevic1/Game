@@ -118,7 +118,7 @@ public class StoreHud : MonoBehaviour
 
         bool affordable = store.Shortfall(item) == 0;
         Hud.Label(new Rect(row.x + textWidth, row.y + (row.height - line) * 0.5f, priceWidth, line),
-                  "$" + item.price.ToString("N0"), Hud.ReadoutRight,
+                  "$" + item.CurrentPrice.ToString("N0"), Hud.ReadoutRight,
                   affordable ? affordText : tooDearText);
 
         Rect button = new Rect(row.xMax - buttonWidth - line * 0.4f, row.y + row.height * 0.2f,

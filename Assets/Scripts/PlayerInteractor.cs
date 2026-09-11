@@ -441,7 +441,7 @@ public class PlayerInteractor : MonoBehaviour
     {
         if (carried == null) return;   // empty-handed death changes nothing
 
-        // Use the recorded death position: Respawn is about to move the player.
+        // Use the recorded death position, the same spot Revival leaves the body on.
         Vector3 where = vitals != null ? vitals.LastDeathPosition : transform.position;
         DropCarriedAt(where, transform.rotation);
     }

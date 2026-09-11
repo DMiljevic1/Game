@@ -40,6 +40,19 @@ public static class LootSpawnPointBuilder
     const int   FieldTries = 320;
     const int   FieldCap = 24;
 
+    const float DeepInner = 34f;        // the woods proper, out where Tom's camp is
+    const float DeepOuter = 46f;
+    const int   DeepTries = 380;
+    const int   DeepCap = 24;
+
+    // A few spots round Tom's camp, so the Large piece LootSpawner puts beside it always has
+    // somewhere to stand: the woods there are dense, and the Deep ring alone left two.
+    const string CampPath = "Props/TomsCamp";   // built by PrototypeEnvironmentBuilder.BuildTomsCamp
+    const float CampInner = 3.5f;       // clear of the case itself
+    const float CampOuter = 14f;
+    const int   CampTries = 220;
+    const int   CampCap = 10;
+
     const float PointSpacing = 2.0f;    // no two markers closer than this
 
     // Each region gets its own budget rather than sharing one pool. A single global cap
@@ -95,22 +108,35 @@ public static class LootSpawnPointBuilder
         List<Vector3> accepted = new List<Vector3>();
 
         int indoor = AddIndoorGrid(spawner, root.transform, accepted);
-        int yard = AddRing(spawner, root.transform, accepted, YardInner, YardOuter, YardTries, YardCap, "Yard");
-        int field = AddRing(spawner, root.transform, accepted, FieldInner, FieldOuter, FieldTries, FieldCap, "Field");
+        int yard = AddRing(spawner, root.transform, accepted, Vector3.zero, YardInner, YardOuter, YardTries, YardCap, "Yard");
+        int field = AddRing(spawner, root.transform, accepted, Vector3.zero, FieldInner, FieldOuter, FieldTries, FieldCap, "Field");
+        int deep = AddRing(spawner, root.transform, accepted, Vector3.zero, DeepInner, DeepOuter, DeepTries, DeepCap, "Deep");
+
+        int camp = 0;
+        GameObject campRoot = GameObject.Find(CampPath);
+        if (campRoot != null)
+        {
+            Vector3 c = campRoot.transform.position;
+            camp = AddRing(spawner, root.transform, accepted, new Vector3(c.x, 0f, c.z), CampInner, CampOuter, CampTries, CampCap, "Camp");
+        }
+        else
+        {
+            Debug.LogWarning("No " + CampPath + " in the scene; the Large piece may have nowhere to stand by Tom's camp.");
+        }
 
         Random.state = restore;
 
         if (temporary != null) Object.DestroyImmediate(temporary);
 
-        int total = indoor + yard + field;
+        int total = indoor + yard + field + deep + camp;
         if (total == 0)
         {
             Debug.LogError("No valid loot spawn points were found at all -- is the environment built?");
             return;
         }
 
-        Debug.Log(string.Format("Loot spawn points rebuilt: {0} total ({1} house, {2} yard, {3} field).",
-                                total, indoor, yard, field));
+        Debug.Log(string.Format("Loot spawn points rebuilt: {0} total ({1} house, {2} yard, {3} field, {4} deep, {5} by the camp).",
+                                total, indoor, yard, field, deep, camp));
     }
 
     // ------------------------------------------------------------------- regions
@@ -139,8 +165,8 @@ public static class LootSpawnPointBuilder
         return made;
     }
 
-    /// <summary>Scattered points in a ring around the house, sampled until the ring is full.</summary>
-    static int AddRing(LootSpawner spawner, Transform parent, List<Vector3> accepted,
+    /// <summary>Scattered points in a ring around <paramref name="centre"/>, sampled until the ring is full.</summary>
+    static int AddRing(LootSpawner spawner, Transform parent, List<Vector3> accepted, Vector3 centre,
                        float inner, float outer, int tries, int cap, string label)
     {
         int made = 0;
@@ -149,7 +175,7 @@ public static class LootSpawnPointBuilder
         {
             float angle = Random.Range(0f, Mathf.PI * 2f);
             float radius = Mathf.Sqrt(Random.Range(inner * inner, outer * outer));   // even by area
-            Vector3 candidate = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+            Vector3 candidate = centre + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
 
             if (TryAdd(spawner, parent, accepted, candidate, label, made + 1)) made++;
         }

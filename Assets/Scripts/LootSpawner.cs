@@ -57,6 +57,35 @@ public class LootSpawner : MonoBehaviour
     public int maxMediumPerRun = 2;
     public int maxLargePerRun = 1;
 
+    [Header("Guaranteed large piece")]
+    [Tooltip("Every run has at least this many Large pieces, so the deep woods always hold a real " +
+             "'this or the case?' decision. WHICH one is still drawn from the table by weight; only " +
+             "whether there is one is fixed. It replaces the cheapest piece drawn, so the item count " +
+             "is unchanged. 0 = the old behaviour.")]
+    public int minLargePerRun = 1;
+
+    [Tooltip("The first Large piece -- guaranteed or rolled -- is put within Focus Radius of this when " +
+             "there is room: Tom's camp, so the big prize and the case turn up in the same patch of " +
+             "dark. Wired by the builder. Empty = it lands wherever depth sends it.")]
+    public Transform focus;
+    public float focusRadius = 15f;
+
+    [Header("Depth")]
+    [Tooltip("Where depth is measured from: the generator, so deep means far from safety. " +
+             "Wired by the builder. Empty = depth plays no part.")]
+    public Transform depthCentre;
+
+    [Tooltip("Spots nearer than this all count as shallowest.")]
+    public float shallowRadius = 18f;
+
+    [Tooltip("Spots further than this all count as deepest.")]
+    public float deepRadius = 45f;
+
+    [Tooltip("How firmly dearer pieces are sent to the deeper spots. 0 = where things land ignores " +
+             "price (the old behaviour); 1 = strictly, the dearest always furthest out. Rarity is " +
+             "untouched either way: the same items and the same spots are chosen, only the pairing moves.")]
+    [Range(0f, 1f)] public float depthBias = 0.75f;
+
     [Header("Placement")]
     [Tooltip("Nothing spawns this close to another piece of loot, so two items are never " +
              "picked up from the same spot.")]
@@ -90,9 +119,28 @@ public class LootSpawner : MonoBehaviour
     private readonly List<GameObject> spawned = new List<GameObject>();
     private readonly List<Vector3> taken = new List<Vector3>();
     private readonly List<LootSpawnPoint> shuffled = new List<LootSpawnPoint>();
+    private readonly List<Draw> draws = new List<Draw>();
     private readonly Collider[] probeHits = new Collider[24];
 
-    // Authority seam, as with TimeOfDay, Generator, Wallet and MonsterSpawner.
+    // One piece decided but not yet put out: what, where, and whether that spot can take
+    // something Large. A pinned piece (the one by the camp) is never re-paired by depth.
+    private struct Draw
+    {
+        public readonly int kind;
+        public readonly Vector3 surface;
+        public readonly bool allowLarge;
+        public readonly bool pinned;
+
+        public Draw(int kind, Vector3 surface, bool allowLarge, bool pinned)
+        {
+            this.kind = kind;
+            this.surface = surface;
+            this.allowLarge = allowLarge;
+            this.pinned = pinned;
+        }
+    }
+
+    // Authority seam, as with Generator, Wallet and MonsterSpawner.
     protected virtual bool HasAuthority { get { return true; } }
 
     /// <summary>How many pieces of loot are out in the world right now.</summary>
@@ -131,9 +179,10 @@ public class LootSpawner : MonoBehaviour
         CollectPoints();
 
         int wanted = Random.Range(minItems, maxItems + 1);
-        int placed = 0;
 
-        for (int i = 0; i < shuffled.Count && placed < wanted; i++)
+        // WHAT and WHERE, exactly as always: the table decides the items, the shuffle and the
+        // probe decide the spots. Nothing is put out until the pairs are settled below.
+        for (int i = 0; i < shuffled.Count && draws.Count < wanted; i++)
         {
             LootSpawnPoint point = shuffled[i];
             if (point == null) continue;
@@ -142,20 +191,211 @@ public class LootSpawner : MonoBehaviour
             if (!TryResolveSurface(point.transform.position, out surface)) continue;
             if (IsTooCloseToTakenSpot(surface)) continue;
 
-            int kind = PickKind(point.allowLargeItems);
+            int kind = PickKind(point.allowLargeItems, false);
             if (kind < 0) break;                       // every kind has hit its cap
 
-            Place(lootPrefabs[kind], surface);
-            placed++;
+            draws.Add(new Draw(kind, surface, point.allowLargeItems, false));
+            taken.Add(surface);
         }
+
+        GuaranteeLarge();
+        AssignByDepth();
+
+        for (int i = 0; i < draws.Count; i++) Place(lootPrefabs[draws[i].kind], draws[i].surface);
 
         if (useFixedSeed) Random.state = restore;
 
-        if (placed < wanted)
+        if (draws.Count < wanted)
         {
-            Debug.LogWarning("LootSpawner placed " + placed + " of " + wanted + " items: not enough " +
+            Debug.LogWarning("LootSpawner placed " + draws.Count + " of " + wanted + " items: not enough " +
                              "valid spawn points. Run Lab > Loot > Rebuild Loot Spawn Points.", this);
         }
+    }
+
+    /// <summary>
+    /// At least <see cref="minLargePerRun"/> Large pieces a run. Which one is still drawn from
+    /// the table by weight, so a new Large valuable joins in with no extra authoring. It takes
+    /// the place of the cheapest piece drawn, so the number of items is unchanged.
+    /// </summary>
+    private void GuaranteeLarge()
+    {
+        int target = Mathf.Min(minLargePerRun, maxLargePerRun);
+
+        for (int have = CountLarge(); have < target; have++)
+        {
+            int kind = PickKind(true, true);
+            if (kind < 0) break;                        // no Large loot in the table at all
+
+            int victim = CheapestReplaceable();
+            if (victim < 0)
+            {
+                Debug.LogWarning("LootSpawner could not fit a guaranteed Large piece this run.", this);
+                break;
+            }
+            draws[victim] = new Draw(kind, draws[victim].surface, true, false);
+        }
+
+        // The first Large piece goes beside the camp, however it was drawn -- a lucky natural
+        // roll included -- so the prize and the case always compete for the same trip.
+        if (focus == null) return;
+
+        int first = FirstLarge();
+        if (first < 0) return;
+
+        Vector3 spot;
+        if (!TryFocusSpot(out spot))
+        {
+            Debug.LogWarning("LootSpawner found no room for a Large piece within " + focusRadius +
+                             " m of " + focus.name + "; it stays where it was drawn.", this);
+            return;
+        }
+
+        taken.Add(spot);
+        draws[first] = new Draw(draws[first].kind, spot, true, true);
+    }
+
+    /// <summary>A spot that can take a Large piece within <see cref="focusRadius"/> of the focus.</summary>
+    private bool TryFocusSpot(out Vector3 spot)
+    {
+        spot = Vector3.zero;
+        if (focus == null) return false;
+
+        float sqr = focusRadius * focusRadius;
+        for (int i = 0; i < shuffled.Count; i++)
+        {
+            LootSpawnPoint point = shuffled[i];
+            if (point == null || !point.allowLargeItems) continue;
+
+            Vector3 d = point.transform.position - focus.position;
+            d.y = 0f;
+            if (d.sqrMagnitude > sqr) continue;
+
+            Vector3 surface;
+            if (!TryResolveSurface(point.transform.position, out surface)) continue;
+            if (IsTooCloseToTakenSpot(surface)) continue;
+
+            spot = surface;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>The cheapest non-Large piece standing on a spot that could take a Large one.</summary>
+    private int CheapestReplaceable()
+    {
+        int best = -1;
+        int bestValue = int.MaxValue;
+        for (int i = 0; i < draws.Count; i++)
+        {
+            if (IsLarge(draws[i].kind)) continue;
+            if (!draws[i].allowLarge) continue;
+
+            int value = ValueOf(draws[i].kind);
+            if (value < bestValue)
+            {
+                bestValue = value;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Who stands where: dearer pieces go to the deeper spots. The items and the spots are the
+    /// ones the table and the shuffle already chose, so rarity, caps and separation are all
+    /// untouched -- only the pairing moves. Chance blurs the order by (1 - depthBias), so it is
+    /// a tendency players can learn, never a law they can rely on.
+    /// </summary>
+    private void AssignByDepth()
+    {
+        if (depthCentre == null || depthBias <= 0f) return;
+
+        List<int> free = new List<int>();
+        for (int i = 0; i < draws.Count; i++)
+        {
+            if (!draws[i].pinned) free.Add(i);
+        }
+        if (free.Count < 2) return;
+
+        List<Draw> spots = new List<Draw>(free.Count);
+        List<float> keys = new List<float>(free.Count);
+        List<int> kinds = new List<int>(free.Count);
+        for (int i = 0; i < free.Count; i++)
+        {
+            Draw d = draws[free[i]];
+            spots.Add(d);
+            keys.Add(Mathf.Lerp(Random.value, Depth01(d.surface), depthBias));
+            kinds.Add(d.kind);
+        }
+
+        // Dearest first, and Large before anything: only some spots can take them.
+        kinds.Sort(CompareDearestFirst);
+
+        bool[] used = new bool[spots.Count];
+        for (int k = 0; k < kinds.Count; k++)
+        {
+            bool large = IsLarge(kinds[k]);
+            int best = -1;
+            for (int s = 0; s < spots.Count; s++)
+            {
+                if (used[s] || (large && !spots[s].allowLarge)) continue;
+                if (best < 0 || keys[s] > keys[best]) best = s;
+            }
+
+            // Cannot happen -- every Large piece was drawn on a spot that could take it, and they
+            // choose first -- but a missed piece is better than two on one spot.
+            if (best < 0) continue;
+
+            used[best] = true;
+            draws[free[k]] = new Draw(kinds[k], spots[best].surface, spots[best].allowLarge, false);
+        }
+    }
+
+    private int CompareDearestFirst(int a, int b)
+    {
+        bool largeA = IsLarge(a);
+        bool largeB = IsLarge(b);
+        if (largeA != largeB) return largeA ? -1 : 1;
+        return ValueOf(b).CompareTo(ValueOf(a));
+    }
+
+    /// <summary>0 at <see cref="shallowRadius"/> from the depth centre or nearer, 1 at <see cref="deepRadius"/> or further.</summary>
+    private float Depth01(Vector3 p)
+    {
+        Vector3 d = p - depthCentre.position;
+        d.y = 0f;
+        return Mathf.InverseLerp(shallowRadius, deepRadius, d.magnitude);
+    }
+
+    private bool IsLarge(int kind)
+    {
+        Valuable v = ValuableOf(lootPrefabs[kind]);
+        return v != null && v.size == ValuableSize.Large;
+    }
+
+    private int ValueOf(int kind)
+    {
+        Valuable v = ValuableOf(lootPrefabs[kind]);
+        return v != null ? v.value : 0;
+    }
+
+    private int CountLarge()
+    {
+        int n = 0;
+        for (int i = 0; i < draws.Count; i++)
+        {
+            if (IsLarge(draws[i].kind)) n++;
+        }
+        return n;
+    }
+
+    private int FirstLarge()
+    {
+        for (int i = 0; i < draws.Count; i++)
+        {
+            if (IsLarge(draws[i].kind)) return i;
+        }
+        return -1;
     }
 
     /// <summary>Removes loot this spawner put out. Anything else in the level is untouched.</summary>
@@ -167,6 +407,7 @@ public class LootSpawner : MonoBehaviour
         }
         spawned.Clear();
         taken.Clear();
+        draws.Clear();
     }
 
     private void Place(GameObject prefab, Vector3 surface)
@@ -219,12 +460,12 @@ public class LootSpawner : MonoBehaviour
         }
     }
 
-    private int PickKind(bool allowLarge)
+    private int PickKind(bool allowLarge, bool largeOnly)
     {
         float total = 0f;
         for (int i = 0; i < lootPrefabs.Count; i++)
         {
-            if (IsEligible(i, allowLarge)) total += SpawnWeight(ValuableOf(lootPrefabs[i]));
+            if (IsEligible(i, allowLarge, largeOnly)) total += SpawnWeight(ValuableOf(lootPrefabs[i]));
         }
         if (total <= 0f) return -1;
 
@@ -233,7 +474,7 @@ public class LootSpawner : MonoBehaviour
 
         for (int i = 0; i < lootPrefabs.Count; i++)
         {
-            if (!IsEligible(i, allowLarge)) continue;
+            if (!IsEligible(i, allowLarge, largeOnly)) continue;
 
             last = i;
             roll -= SpawnWeight(ValuableOf(lootPrefabs[i]));
@@ -243,22 +484,23 @@ public class LootSpawner : MonoBehaviour
         return last;                                   // rounding only; the table is not empty
     }
 
-    private bool IsEligible(int index, bool allowLarge)
+    private bool IsEligible(int index, bool allowLarge, bool largeOnly)
     {
-        GameObject prefab = lootPrefabs[index];
-        Valuable v = ValuableOf(prefab);
+        Valuable v = ValuableOf(lootPrefabs[index]);
         if (v == null) return false;
         if (!allowLarge && v.size == ValuableSize.Large) return false;
+        if (largeOnly && v.size != ValuableSize.Large) return false;
 
-        return CountOf(prefab.name) < MaxPerRun(v);
+        return CountOf(index) < MaxPerRun(v);
     }
 
-    private int CountOf(string prefabName)
+    /// <summary>How many of this kind the run has drawn so far.</summary>
+    private int CountOf(int kind)
     {
         int n = 0;
-        for (int i = 0; i < spawned.Count; i++)
+        for (int i = 0; i < draws.Count; i++)
         {
-            if (spawned[i] != null && spawned[i].name == prefabName) n++;
+            if (draws[i].kind == kind) n++;
         }
         return n;
     }
@@ -274,7 +516,7 @@ public class LootSpawner : MonoBehaviour
     {
         shuffled.Clear();
 
-        LootSpawnPoint[] all = FindObjectsByType<LootSpawnPoint>(FindObjectsSortMode.None);
+        LootSpawnPoint[] all = FindObjectsByType<LootSpawnPoint>();
         for (int i = 0; i < all.Length; i++)
         {
             if (all[i] != null && all[i].isActiveAndEnabled) shuffled.Add(all[i]);
@@ -299,11 +541,15 @@ public class LootSpawner : MonoBehaviour
 
         // Loot that is already in the level -- fuel cans, the torch -- counts as a taken
         // spot, so a run never stands a spawned item inside one of them.
-        Carryable[] existing = FindObjectsByType<Carryable>(FindObjectsSortMode.None);
+        Carryable[] existing = FindObjectsByType<Carryable>();
         for (int i = 0; i < existing.Length; i++)
         {
             if (existing[i] != null && !existing[i].IsHeld) taken.Add(existing[i].transform.position);
         }
+
+        // Tom's case is put out on the focus by Expedition, possibly after this runs, so its
+        // spot is reserved here rather than found.
+        if (focus != null) taken.Add(focus.position);
     }
 
     private bool IsTooCloseToTakenSpot(Vector3 p)
@@ -399,6 +645,11 @@ public class LootSpawner : MonoBehaviour
             sb.AppendFormat("  {0,-22} {1,-5} {2,-6} weight {3,6:F3}  {4,5:F1}%  max {5}/run\n",
                             v.itemName, v.value, v.size, w, 100f * w / total, MaxPerRun(v));
         }
+
+        sb.AppendFormat("At least {0} Large piece(s) a run{1}.\n", minLargePerRun,
+                        focus != null ? ", put within " + focusRadius + " m of " + focus.name + " when there is room" : "");
+        sb.AppendFormat("Depth bias {0:F2}: dearer pieces tend to land further from {1}.\n", depthBias,
+                        depthCentre != null ? depthCentre.name : "(nothing -- depth is off)");
 
         Debug.Log(sb.ToString(), this);
     }

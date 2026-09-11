@@ -1,133 +1,46 @@
 using UnityEngine;
 
-public enum DayPhase
-{
-    Day,
-    Dusk,
-    Night,
-    Dawn
-}
-
 /// <summary>
-/// The single authoritative clock for a level. Every other system (generator drain,
-/// monster spawning, ambience) reads this rather than keeping its own timer.
+/// What time of day the level is, and the light that goes with it. Level 1 is always
+/// night: there is no cycle, no clock and no phase change, so nothing here ticks. It puts
+/// the moon and the night ambient up once, in Awake, and they stay.
 ///
-/// Co-op note: only the authority advances the clock. When netcode is added,
-/// cycleTime becomes a synced variable and HasAuthority becomes IsServer -- nothing
-/// else in this class needs to change, and no other system should ever write time.
+/// NightDepth darkens that ambient with distance from the house. It reads the base colours
+/// from here instead of scaling whatever is in RenderSettings, so it can never compound.
+///
+/// Co-op note: the night is fixed, so there is nothing to sync -- every client lights its
+/// own scene from the same numbers.
 /// </summary>
 [DisallowMultipleComponent]
 public class TimeOfDay : MonoBehaviour
 {
     public static TimeOfDay Instance { get; private set; }
 
-    [Header("Phase lengths (real seconds)")]
-    public float dayLength = 480f;    // 8:00 - explore, gather, prepare
-    public float duskLength = 120f;   // 2:00 - the warning window: get home
-    public float nightLength = 300f;  // 5:00 - survive
-    public float dawnLength = 60f;    // 1:00 - relief before full daylight
-
-    [Header("Flow")]
-    [Tooltip("Multiplier for testing. 1 = real pace, 8 = a full cycle in two minutes.")]
-    public float timeScale = 1f;
-    public bool paused = false;
-    [Tooltip("Where the very first cycle starts, 0-1 through the day phase.")]
-    [Range(0f, 1f)] public float startOfDayOffset = 0f;
-    [Tooltip("Which phase the level opens in. Day honours startOfDayOffset; the others open at their own start.")]
-    public DayPhase startPhase = DayPhase.Day;
-
-    [Header("Lighting")]
+    [Header("Moonlight")]
+    [Tooltip("The one directional light. It shines as the moon, so the canopy still throws shadows.")]
     public Light sun;
-    public float sunYaw = 30f;
-    public float dayIntensity = 1.2f;
     public float nightIntensity = 0.12f;
-    public Color dayColor = new Color(1.00f, 0.96f, 0.88f);
-    public Color horizonColor = new Color(1.00f, 0.55f, 0.28f);
     public Color nightColor = new Color(0.45f, 0.55f, 0.85f);
-    public float dayAmbient = 1.0f;
+    [Tooltip("Compass heading the moon shines towards.")]
+    public float moonYaw = 30f;
+    [Tooltip("How high the moon rides, in degrees above the horizon.")]
+    [Range(10f, 80f)] public float moonElevation = 40f;
+
+    [Header("Ambient (gradient: sky above, ground below)")]
+    public Color nightAmbientColor = new Color(0.30f, 0.38f, 0.60f);
     public float nightAmbient = 0.22f;
 
-    [Header("Debug")]
-    public bool showDebugClock = true;
-
-    // Subscribers use these to react to the world changing state. Initialised so
-    // callers never have to null check.
-    public event System.Action<DayPhase, DayPhase> OnPhaseChanged = delegate { };
-    public event System.Action<int> OnDayStarted = delegate { };
-
-    private float cycleTime;          // seconds elapsed within the current 24h cycle
-    private DayPhase phase = DayPhase.Day;
-    private int dayNumber = 1;
-
-    public DayPhase Phase { get { return phase; } }
-    public int DayNumber { get { return dayNumber; } }
-
-    /// <summary>True only during full night.</summary>
-    public bool IsNight { get { return phase == DayPhase.Night; } }
-
-    /// <summary>Dusk and night: when it is unsafe to be outside.</summary>
-    public bool IsDark { get { return phase == DayPhase.Dusk || phase == DayPhase.Night; } }
-
-    public float CycleLength { get { return dayLength + duskLength + nightLength + dawnLength; } }
-
-    /// <summary>Seconds of real time until the current phase ends.</summary>
-    public float TimeUntilPhaseEnd
-    {
-        get
-        {
-            float end = PhaseEnd(phase);
-            return Mathf.Max(0f, (end - cycleTime) / Mathf.Max(0.0001f, timeScale));
-        }
-    }
-
-    /// <summary>In-game hour, 0-24, for display and for driving the sun.</summary>
-    public float HourOfDay
-    {
-        get
-        {
-            // Each phase covers a fixed slice of the in-game clock, so a short night
-            // still moves the sun through the full night-time arc.
-            // Sunrise (06:00) and sunset (18:00) sit in the MIDDLE of dawn and dusk,
-            // so those phases are the light actually changing rather than already-dark.
-            if (cycleTime < PhaseEnd(DayPhase.Day))
-                return Mathf.Lerp(7f, 17f, Progress(0f, dayLength));
-            if (cycleTime < PhaseEnd(DayPhase.Dusk))
-                return Mathf.Lerp(17f, 19f, Progress(PhaseEnd(DayPhase.Day), duskLength));
-            if (cycleTime < PhaseEnd(DayPhase.Night))
-                return Mathf.Repeat(Mathf.Lerp(19f, 29f, Progress(PhaseEnd(DayPhase.Dusk), nightLength)), 24f);
-            return Mathf.Lerp(5f, 7f, Progress(PhaseEnd(DayPhase.Night), dawnLength));
-        }
-    }
-
-    // Authority seam. Becomes IsServer/IsHost once netcode is in; until then the
-    // local game is the authority.
-    protected virtual bool HasAuthority { get { return true; } }
-
-    /// <summary>
-    /// Overwrite the clock position and refresh everything derived from it. Normal
-    /// play never calls this: it exists so a networked client can mirror the
-    /// authority's value, and so the editor can preview a phase without Play mode.
-    /// </summary>
-    public void SetCycleTime(float seconds)
-    {
-        cycleTime = Mathf.Repeat(seconds, CycleLength);
-
-        DayPhase current = PhaseAt(cycleTime);
-        if (current != phase)
-        {
-            DayPhase previous = phase;
-            phase = current;
-            OnPhaseChanged(previous, current);
-        }
-
-        ApplyLighting();
-    }
+    // A strong equator is what lets trunks, walls and canopies read at night: they face
+    // the horizon, and with near-black albedo a weak one leaves them as cut-outs.
+    public Color AmbientSky { get { return nightAmbientColor * nightAmbient; } }
+    public Color AmbientEquator { get { return AmbientSky * 0.7f; } }
+    public Color AmbientGround { get { return AmbientSky * 0.3f; } }
 
     void Awake()
     {
         if (Instance != null && Instance != this)
         {
-            Debug.LogError("A second TimeOfDay exists on " + name + "; destroying it. There must be exactly one clock.", this);
+            Debug.LogError("A second TimeOfDay exists on " + name + "; destroying it. There must be exactly one.", this);
             Destroy(this);
             return;
         }
@@ -135,11 +48,10 @@ public class TimeOfDay : MonoBehaviour
 
         if (sun == null)
         {
-            Debug.LogError("TimeOfDay has no sun assigned; lighting will not change with time.", this);
+            Debug.LogError("TimeOfDay has no sun assigned; the moonlight will not be set.", this);
         }
 
-        cycleTime = StartCycleTime();
-        phase = PhaseAt(cycleTime);
+        ApplyLighting();
     }
 
     void OnDestroy()
@@ -147,127 +59,27 @@ public class TimeOfDay : MonoBehaviour
         if (Instance == this) Instance = null;
     }
 
-    void Start()
+    /// <summary>
+    /// Puts the night's light on the scene. Runs once in Awake; the environment builder
+    /// calls it to preview the night in the Scene view without Play mode.
+    /// </summary>
+    public void ApplyLighting()
     {
-        ApplyLighting();
-        OnDayStarted(dayNumber);
-    }
-
-    void Update()
-    {
-        if (HasAuthority && !paused)
+        if (sun != null)
         {
-            cycleTime += Time.deltaTime * timeScale;
-
-            if (cycleTime >= CycleLength)
-            {
-                cycleTime -= CycleLength;
-                dayNumber++;
-                OnDayStarted(dayNumber);
-            }
+            sun.transform.rotation = Quaternion.Euler(moonElevation, moonYaw, 0f);
+            sun.intensity = nightIntensity;
+            sun.color = nightColor;
         }
 
-        DayPhase current = PhaseAt(cycleTime);
-        if (current != phase)
-        {
-            DayPhase previous = phase;
-            phase = current;
-            OnPhaseChanged(previous, current);
-        }
+        // A gradient rather than the skybox: the night sky is near black, so skybox
+        // ambient left nothing but the lamps. Colours also take effect immediately,
+        // with no environment re-bake.
+        if (RenderSettings.ambientMode != UnityEngine.Rendering.AmbientMode.Trilight)
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
 
-        ApplyLighting();
-    }
-
-    // Only Day reads startOfDayOffset; the rest open at their own boundary so a
-    // level can drop the player straight into night without faking the clock.
-    private float StartCycleTime()
-    {
-        switch (startPhase)
-        {
-            case DayPhase.Dusk: return dayLength;
-            case DayPhase.Night: return dayLength + duskLength;
-            case DayPhase.Dawn: return dayLength + duskLength + nightLength;
-            default: return dayLength * startOfDayOffset;
-        }
-    }
-
-    private float Progress(float phaseStart, float length)
-    {
-        return Mathf.Clamp01((cycleTime - phaseStart) / Mathf.Max(0.0001f, length));
-    }
-
-    private float PhaseEnd(DayPhase p)
-    {
-        switch (p)
-        {
-            case DayPhase.Day: return dayLength;
-            case DayPhase.Dusk: return dayLength + duskLength;
-            case DayPhase.Night: return dayLength + duskLength + nightLength;
-            default: return CycleLength;
-        }
-    }
-
-    private DayPhase PhaseAt(float t)
-    {
-        if (t < PhaseEnd(DayPhase.Day)) return DayPhase.Day;
-        if (t < PhaseEnd(DayPhase.Dusk)) return DayPhase.Dusk;
-        if (t < PhaseEnd(DayPhase.Night)) return DayPhase.Night;
-        return DayPhase.Dawn;
-    }
-
-    private void ApplyLighting()
-    {
-        if (sun == null) return;
-
-        float hour = HourOfDay;
-
-        // 06:00 puts the sun on the horizon, 12:00 overhead.
-        float pitch = (hour / 24f) * 360f - 90f;
-        sun.transform.rotation = Quaternion.Euler(pitch, sunYaw, 0f);
-
-        // How high the sun sits, -1 (deep night) to 1 (noon).
-        float elevation = Mathf.Sin(pitch * Mathf.Deg2Rad);
-
-        float daylight = Mathf.Clamp01(elevation / 0.25f);          // full brightness once well up
-        float horizon = Mathf.Clamp01(1f - Mathf.Abs(elevation) / 0.25f); // peaks at sunrise/sunset
-
-        // Ambient lags the sun: the sky stays lit for a while after it drops below
-        // the horizon, which is what makes twilight readable instead of a light switch.
-        float skylight = Mathf.Clamp01((elevation + 0.18f) / 0.45f);
-
-        sun.intensity = Mathf.Lerp(nightIntensity, dayIntensity, daylight);
-
-        Color c = Color.Lerp(nightColor, dayColor, daylight);
-        sun.color = Color.Lerp(c, horizonColor, horizon * 0.8f);
-
-        RenderSettings.ambientIntensity = Mathf.Lerp(nightAmbient, dayAmbient, skylight);
-    }
-
-    void OnGUI()
-    {
-        if (!showDebugClock) return;
-
-        int h = Mathf.FloorToInt(HourOfDay);
-        int m = Mathf.FloorToInt((HourOfDay - h) * 60f);
-
-        string line = string.Format("Day {0}   {1:00}:{2:00}   {3}   next in {4:0}s",
-                                    dayNumber, h, m, phase.ToString().ToUpper(), TimeUntilPhaseEnd);
-
-        // Colour the clock by phase: the HUD should read at a glance in a panic.
-        Color tint;
-        switch (phase)
-        {
-            case DayPhase.Dusk: tint = new Color(1f, 0.70f, 0.35f); break;
-            case DayPhase.Night: tint = new Color(1f, 0.45f, 0.45f); break;
-            case DayPhase.Dawn: tint = new Color(0.75f, 0.85f, 1f); break;
-            default: tint = Color.white; break;
-        }
-
-        Hud.Row(0, line, tint);
-        if (timeScale != 1f || paused)
-        {
-            Hud.Row(1, paused ? "clock PAUSED" : string.Format("clock x{0}", timeScale),
-                    new Color(0.7f, 0.9f, 1f));
-        }
+        RenderSettings.ambientSkyColor = AmbientSky;
+        RenderSettings.ambientEquatorColor = AmbientEquator;
+        RenderSettings.ambientGroundColor = AmbientGround;
     }
 }

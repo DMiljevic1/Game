@@ -5,7 +5,7 @@ using UnityEngine;
 /// out goes through <see cref="Add"/>; nothing else writes the balance.
 ///
 /// Co-op note: this is deliberately one object owning one piece of shared state,
-/// the same shape as TimeOfDay. Only the authority mints money - a client mirrors
+/// the same shape as RunState. Only the authority mints money - a client mirrors
 /// the value it is told via <see cref="SetMoney"/>. Money is shared by the team,
 /// not per-player, so there is exactly one Wallet in the level.
 /// </summary>

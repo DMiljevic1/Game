@@ -83,15 +83,9 @@ public class Valuable : Carryable
                 break;
 
             case ValuableSize.Large:
-                // Slow enough that the monster's 3.6 outpaces the 3.1 this leaves:
-                // carrying the television home past something hunting you is the gamble.
-                carryMoveMultiplier = 0.62f;
-                carrySprintMultiplier = 1f;      // unused while sprinting is off
-                allowSprintWhileCarried = false;
-
-                // Too big to shoulder as well as too heavy to run with: the television is a
-                // whole trip in your hands, never one of four things you grabbed on the way.
-                canBeStoredInInventory = false;
+                // Carrying the television home past something hunting you is the gamble.
+                // Shared with Tom's case, so the two can never drift apart.
+                ApplyLargeLoad();
                 break;
 
             case ValuableSize.Custom:

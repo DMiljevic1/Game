@@ -1,9 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
-/// Puts monsters into the world at dusk and takes them away at dawn, so "they don't
-/// come during the day" is true in the simulation before any journal page says it.
+/// Puts the night's monsters into the world when the level starts. Level 1 is always
+/// night, so the wave is out from the first frame and stays out.
 ///
 /// Co-op note: spawning is authority-only. Clients will receive spawned monsters
 /// through netcode rather than running this themselves.
@@ -16,10 +17,8 @@ public class MonsterSpawner : MonoBehaviour
     public Transform player;
 
     [Header("How many")]
-    public int baseCount = 4;
-    [Tooltip("Extra monsters added per day survived, so pressure grows.")]
-    public int extraPerDay = 1;
-    public int maxCount = 12;
+    [FormerlySerializedAs("baseCount")]
+    public int waveSize = 4;
 
     [Header("Where")]
     public Vector3 areaCenter = new Vector3(6.5f, 0f, -12f);
@@ -35,42 +34,21 @@ public class MonsterSpawner : MonoBehaviour
     private Transform[] routePoints;
 
     private readonly List<GameObject> spawned = new List<GameObject>();
-    private TimeOfDay clock;
 
-    // Authority seam, as with TimeOfDay and Generator.
+    // Authority seam, as with Generator and Wallet.
     protected virtual bool HasAuthority { get { return true; } }
 
     public int AliveCount { get { return spawned.Count; } }
 
     void Start()
     {
-        clock = TimeOfDay.Instance;
-        if (clock == null)
-        {
-            Debug.LogError("MonsterSpawner found no TimeOfDay; monsters will never spawn.", this);
-            return;
-        }
         if (monsterPrefab == null)
         {
             Debug.LogError("MonsterSpawner has no monster prefab assigned.", this);
             return;
         }
 
-        clock.OnPhaseChanged += HandlePhaseChanged;
-    }
-
-    void OnDestroy()
-    {
-        if (clock != null) clock.OnPhaseChanged -= HandlePhaseChanged;
-    }
-
-    private void HandlePhaseChanged(DayPhase previous, DayPhase current)
-    {
-        if (!HasAuthority) return;
-
-        // Dusk, not night: they should already be out there when the light goes.
-        if (current == DayPhase.Dusk) SpawnWave();
-        else if (current == DayPhase.Dawn) DespawnAll();
+        if (HasAuthority) SpawnWave();
     }
 
     /// <summary>The route's children, cached: the same array is shared by the whole wave.</summary>
@@ -90,7 +68,7 @@ public class MonsterSpawner : MonoBehaviour
 
         Transform[] route = RoutePoints();
 
-        int count = Mathf.Min(maxCount, baseCount + extraPerDay * (clock.DayNumber - 1));
+        int count = waveSize;
 
         for (int i = 0; i < count; i++)
         {
@@ -139,7 +117,9 @@ public class MonsterSpawner : MonoBehaviour
 
             Vector3 ground = hit.point + Vector3.up * 1.1f;
 
-            if (Generator.IsPointProtected(ground)) continue;
+            // The radius, not the running state: the generator starts the level switched off,
+            // and a wave spawned in the yard before anyone could start it would be no choice at all.
+            if (Generator.IsInsideAnyRadius(ground)) continue;
             if (player != null && Vector3.Distance(ground, player.position) < minDistanceFromPlayer) continue;
 
             point = ground;

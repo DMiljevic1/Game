@@ -17,6 +17,7 @@ public static class Hud
     private static GUIStyle slotLabel;
     private static GUIStyle slotKey;
     private static GUIStyle button;
+    private static GUIStyle paragraph;
     private static Texture2D pixel;
     private static int builtForHeight = -1;
 
@@ -34,6 +35,9 @@ public static class Hud
     /// <summary>A clickable button, scaled like the rest of the HUD. The only place in
     /// the game the mouse is used, so it needs to be the size of a real target.</summary>
     public static GUIStyle Button { get { Build(); return button; } }
+
+    /// <summary>Word-wrapped body text for notes and papers, read at leisure rather than at a glance.</summary>
+    public static GUIStyle Paragraph { get { Build(); return paragraph; } }
 
     /// <summary>Height of one readout line, for stacking rows down the corner.</summary>
     public static float LineHeight { get { Build(); return readout.fontSize * 1.5f; } }
@@ -84,6 +88,11 @@ public static class Hud
         button = new GUIStyle(GUI.skin.button);
         button.fontSize = readoutSize;
         button.fontStyle = FontStyle.Bold;
+
+        paragraph = new GUIStyle(readout);
+        paragraph.fontStyle = FontStyle.Normal;
+        paragraph.alignment = TextAnchor.UpperLeft;
+        paragraph.wordWrap = true;
     }
 
     /// <summary>
@@ -134,6 +143,18 @@ public static class Hud
     public static void Label(Rect rect, string text, GUIStyle style)
     {
         Label(rect, text, style, Color.white);
+    }
+
+    /// <summary>
+    /// Text with no shadow, for dark ink on a light panel -- a note, a map -- where the
+    /// black shadow <see cref="Label"/> draws would only smear it.
+    /// </summary>
+    public static void Ink(Rect rect, string text, GUIStyle style, Color ink)
+    {
+        Color previous = GUI.color;
+        GUI.color = ink;
+        GUI.Label(rect, text, style);
+        GUI.color = previous;
     }
 
     /// <summary>A readout row in the top-left corner. Row 0 is the top line.</summary>

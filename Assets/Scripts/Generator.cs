@@ -19,7 +19,7 @@ public class Generator : MonoBehaviour, IInteractable
     [Header("Fuel")]
     public float fuelCapacity = 100f;
     public float fuel = 100f;
-    [Tooltip("Fuel burned per second of real time at timeScale 1.")]
+    [Tooltip("Fuel burned per second of running.")]
     public float burnRate = 0.25f;
     [Tooltip("Fires OnLowFuel once when fuel drops below this.")]
     public float lowFuelThreshold = 25f;
@@ -53,7 +53,7 @@ public class Generator : MonoBehaviour, IInteractable
     /// <summary>Real seconds of runtime left at the current burn rate.</summary>
     public float SecondsOfFuelLeft { get { return burnRate <= 0f ? Mathf.Infinity : fuel / burnRate; } }
 
-    // Authority seam, same as TimeOfDay. Becomes IsServer once netcode is in.
+    // Authority seam, same as Wallet. Becomes IsServer once netcode is in.
     protected virtual bool HasAuthority { get { return true; } }
 
     /// <summary>True if any running generator covers this point.</summary>
@@ -76,6 +76,23 @@ public class Generator : MonoBehaviour, IInteractable
                 return g;
         }
         return null;
+    }
+
+    /// <summary>
+    /// True if the point lies inside any generator's radius, running or not. For decisions
+    /// about the ground itself rather than about safety right now -- a generator that starts
+    /// the level switched off must still keep monsters from spawning in its yard.
+    /// </summary>
+    public static bool IsInsideAnyRadius(Vector3 point)
+    {
+        for (int i = 0; i < active.Count; i++)
+        {
+            Generator g = active[i];
+            if (g == null) continue;
+            if ((point - g.transform.position).sqrMagnitude <= g.protectionRadius * g.protectionRadius)
+                return true;
+        }
+        return false;
     }
 
     void OnEnable() { active.Add(this); }
@@ -125,17 +142,7 @@ public class Generator : MonoBehaviour, IInteractable
     {
         if (!isRunning) return;
 
-        // Scale with the clock so testing at timeScale 8 also drains 8x: a tank
-        // always lasts the same fraction of a night regardless of test speed.
-        float scale = 1f;
-        TimeOfDay clock = TimeOfDay.Instance;
-        if (clock != null)
-        {
-            if (clock.paused) return;
-            scale = clock.timeScale;
-        }
-
-        fuel -= burnRate * Time.deltaTime * scale;
+        fuel -= burnRate * Time.deltaTime;
 
         if (!lowFuelFired && fuel <= lowFuelThreshold)
         {

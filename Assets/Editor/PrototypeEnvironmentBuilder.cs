@@ -43,7 +43,9 @@ public static class PrototypeEnvironmentBuilder
     {
         "Player", "Systems", "Directional Light", "Global Volume",
         "Generator", "PlayerRespawn", "FuelCans", "Flashlight",
-        "SellStation", "Store", "Valuables"
+        "SellStation", "Store", "Valuables",
+        // Hand-authored monster wiring: MonsterSpawner.patrolRoute points at PatrolRoute.
+        "PatrolRoute", "Monster_Test"
     };
 
     // ------------------------------------------------------------- materials
@@ -51,10 +53,17 @@ public static class PrototypeEnvironmentBuilder
 
     static Material grass, dirt, wallExt, wallInt, floorWood, roofMat, wood, plank,
                     fabric, metalDark, metalPale, glass, bark, foliage, foliageAlt,
-                    rockMat, bushMat, lampWarm, lampDead, ceramic;
+                    rockMat, bushMat, lampWarm, lampDead, ceramic, paint;
 
     // Trunk positions, so props and the path can avoid growing inside a tree.
     static readonly List<Vector2> occupied = new List<Vector2>();
+
+    // Where Tom's case is put out at run time. Built with Props, wired into Expedition.
+    static Transform campPoint;
+
+    // Deep in the south-west woods, along the line the wreck's headlight points: far
+    // enough out to be properly dark, well inside the treeline so it is not at the wall.
+    static readonly Vector2 CampTarget = new Vector2(-18f, -38f);
 
     [MenuItem("Lab/Environment/Build Prototype Environment")]
     public static void Build()
@@ -223,6 +232,8 @@ public static class PrototypeEnvironmentBuilder
         bushMat    = Mat("Env_Bush",        new Color(0.040f, 0.058f, 0.038f), 0.03f, 0f, Color.black);
         lampWarm   = Mat("Light_WarmBulb",  new Color(0.320f, 0.230f, 0.130f), 0.30f, 0f, new Color(3.2f, 2.0f, 0.85f));
         lampDead   = Mat("Light_DeadBulb",  new Color(0.180f, 0.180f, 0.170f), 0.60f, 0f, Color.black);
+        // Pale, so Tom's trail marks and paper read in a torch beam against near-black bark.
+        paint      = Mat("Env_Paint",       new Color(0.420f, 0.410f, 0.370f), 0.10f, 0f, Color.black);
         AssetDatabase.SaveAssets();
     }
 
@@ -377,6 +388,14 @@ public static class PrototypeEnvironmentBuilder
     static Transform BuildHouse()
     {
         Transform house = Root("House");
+
+        // The safe house as a volume: where a body has to lie for Adrenaline to revive it.
+        // Sized from the footprint, so a resized house resizes it too.
+        ReviveZone zone = house.GetComponent<ReviveZone>();
+        if (zone == null) zone = house.gameObject.AddComponent<ReviveZone>();
+        zone.center = new Vector3(0f, (FloorTop + RoofY) * 0.5f, 0f);
+        zone.size = new Vector3(HouseHalfX * 2f, RoofY - FloorTop + 0.5f, HouseHalfZ * 2f);
+
         Transform shell = Group(house, "Shell");
         Transform walls = Group(house, "Walls");
         Transform doors = Group(house, "Doors");
@@ -458,11 +477,21 @@ public static class PrototypeEnvironmentBuilder
         Prim(porch, "Porch_LooseBoard", PrimitiveType.Cube, new Vector3(1.4f, 0.12f, -9.4f),
              new Vector3(1.8f, 0.06f, 0.24f), plank, new Vector3(0f, 24f, 6f));
 
-        // A shutter hanging off one hinge, and a nailed-up notice: cheap decay cues.
+        // A shutter hanging off one hinge: a cheap decay cue.
         Prim(detail, "Shutter_Loose", PrimitiveType.Cube, new Vector3(x0 - 0.2f, 1.9f, -2.1f),
              new Vector3(0.06f, 1.1f, 0.7f), plank, new Vector3(0f, 0f, 14f));
-        Prim(detail, "Notice", PrimitiveType.Cube, new Vector3(3.35f, 1.85f, z0 - 0.1f),
-             new Vector3(0.34f, 0.46f, 0.02f), plank, new Vector3(0f, 0f, -7f), false);
+
+        // The nailed-up notice beside the front door: the one thing in the level anyone has
+        // to read, and all it has to say is where to go. It needs a collider to be looked at.
+        GameObject notice = Prim(detail, "Notice", PrimitiveType.Cube, new Vector3(3.35f, 1.85f, z0 - 0.1f),
+                                 new Vector3(0.34f, 0.46f, 0.02f), plank, new Vector3(0f, 0f, -7f));
+        Readable note = notice.AddComponent<Readable>();
+        note.prompt = "Read the notice";
+        note.title = "Notice";
+        note.text = "KEEP THE GENERATOR RUNNING.\nDON'T RUN.\n\n" +
+                    "Tom took the map into the woods, past the car. We couldn't wait any longer.\n\n" +
+                    "- R.\n\n" +
+                    "(Under the writing, a pencil sketch: the house, the car, a row of trees - and an X beyond them.)";
 
         return house;
     }
@@ -474,8 +503,13 @@ public static class PrototypeEnvironmentBuilder
         float y0 = FloorTop + 1.0f, y1 = FloorTop + 2.1f;
         float outward = fixedAxis > 0f ? 1f : -1f;
 
-        if (alongX) Box(parent, name + "_Pane", centre - width * 0.5f, centre + width * 0.5f, y0, y1, fixedAxis - 0.02f, fixedAxis + 0.02f, glass, false);
-        else Box(parent, name + "_Pane", fixedAxis - 0.02f, fixedAxis + 0.02f, y0, y1, centre - width * 0.5f, centre + width * 0.5f, glass, false);
+        GameObject pane = alongX
+            ? Box(parent, name + "_Pane", centre - width * 0.5f, centre + width * 0.5f, y0, y1, fixedAxis - 0.02f, fixedAxis + 0.02f, glass, false)
+            : Box(parent, name + "_Pane", fixedAxis - 0.02f, fixedAxis + 0.02f, y0, y1, centre - width * 0.5f, centre + width * 0.5f, glass, false);
+
+        // Glass lets the room lamps out, so a lit house throws window-shaped pools onto
+        // the yard. Boards still cast, which is what slats the light on the boarded ones.
+        pane.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
         if (!boarded) return;
 
@@ -609,6 +643,13 @@ public static class PrototypeEnvironmentBuilder
              new Vector3(0.72f, 1.7f, 0.07f), metalPale, new Vector3(0f, 62f, 0f));
         // Table and two chairs.
         Table(kitchen, "KitchenTable", new Vector3(3.9f, 0f, 1.6f), 1.6f, 0.95f, 0.76f, wood);
+        // Where Tom's case is opened and the level ends. It offers nothing unless the
+        // case is in your hands, so it stays an ordinary table until then.
+        Transform kitchenTable = kitchen.Find("KitchenTable");
+        Transform caseRest = Group(kitchenTable, "CaseRest");
+        caseRest.localPosition = new Vector3(-0.3f, y + 0.76f, -0.12f);   // clear of the pot and the mug
+        caseRest.localEulerAngles = new Vector3(0f, 8f, 0f);
+        kitchenTable.gameObject.AddComponent<CaseTable>().restPoint = caseRest;
         Chair(kitchen, "Chair_A", new Vector3(3.9f, 0f, 0.75f), 0f);
         Chair(kitchen, "Chair_B", new Vector3(3.2f, 0f, 2.55f), 172f);
         Prim(kitchen, "Pot", PrimitiveType.Cylinder, new Vector3(4.2f, y + 0.86f, 1.5f),
@@ -910,6 +951,261 @@ public static class PrototypeEnvironmentBuilder
         Box(shed, "Shed_WallE", 1.65f, 1.8f, g, g + 2.1f, -1.45f, 1.45f, plank);
         Prim(shed, "Shed_Roof", PrimitiveType.Cube, new Vector3(0f, g + 2.35f, 0f), new Vector3(4.1f, 0.12f, 3.4f), roofMat, new Vector3(-8f, 0f, 0f));
         Box(shed, "Shed_Crate", -1.2f, -0.5f, g, g + 0.7f, 0.3f, 1.0f, plank);
+
+        // Nina's drawing, pinned inside the back wall. Optional: nothing needs it read, but
+        // anyone who looks learns the one rule the grown-ups got wrong.
+        GameObject drawing = Prim(shed, "Shed_Drawing", PrimitiveType.Cube, new Vector3(0.45f, g + 1.35f, 1.27f),
+                                  new Vector3(0.42f, 0.3f, 0.01f), paint, new Vector3(0f, 0f, 3f));
+        Readable picture = drawing.AddComponent<Readable>();
+        picture.prompt = "Look at the drawing";
+        picture.text = "A child's crayon drawing, pinned to the wall.\n\n" +
+                       "A yellow house inside a big yellow circle. Grey people all the way round the outside - no eyes, huge ears.\n\n" +
+                       "Across the top, in big wobbly letters:  SHHH\n\n" +
+                       "In the corner:  NINA";
+
+        // --- old lamps: the only light out here the generator does not own ------------
+        // Few, and all within sight of the house: the way in, the shed, the wreck. Past
+        // them the woods belong to the moon and the torch. None cast shadows (a point
+        // light's shadow costs six atlas slices) except the headlight, a spot, which costs one.
+        Transform lamps = Group(props, "Lamps");
+
+        // A lantern post where the path leaves the trees, so the way home reads from the treeline.
+        Box(lamps, "PathLamp_Post", 6.65f, 6.77f, g, g + 2.7f, -19.86f, -19.74f, wood);
+        Box(lamps, "PathLamp_Arm", 6.0f, 6.77f, g + 2.58f, g + 2.66f, -19.84f, -19.76f, wood, false);
+        OldLamp(lamps, "PathLamp", new Vector3(6.1f, g + 2.3f, -19.8f), 3.2f, 10f, 0.06f, true);
+
+        // Hurricane lamp under the shed eave, left burning by whoever left.
+        OldLamp(shed, "ShedLamp", new Vector3(1.0f, g + 1.8f, -1.4f), 2.4f, 7f, 0.12f, true);
+
+        // One headlight still dying on the wreck's battery, staring off into the trees.
+        Light beam = OldLamp(car, "Car_Headlight", new Vector3(2.02f, g + 0.72f, 0.55f), 6f, 14f, 0.3f, false);
+        beam.type = LightType.Spot;
+        beam.spotAngle = 55f;
+        beam.shadows = LightShadows.Soft;
+        beam.transform.localEulerAngles = new Vector3(8f, 90f, 0f);   // along the car's +x, dipped
+
+        campPoint = BuildTomsCamp(props, beam.transform);
+
+        Light OldLamp(Transform parent, string name, Vector3 pos, float intensity, float range,
+                      float stuttersPerSecond, bool hanging)
+        {
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+
+            Light l = go.AddComponent<Light>();
+            l.type = LightType.Point;
+            l.color = new Color(1f, 0.64f, 0.32f);   // oil and old filament: warmer than the house
+            l.intensity = intensity;
+            l.range = range;
+            l.shadows = LightShadows.None;
+
+            // Old supply, so it stutters - the house lamps never do.
+            go.AddComponent<LightFlicker>().stuttersPerSecond = stuttersPerSecond;
+
+            Prim(go.transform, name + "_Bulb", PrimitiveType.Sphere, Vector3.zero,
+                 new Vector3(0.13f, 0.13f, 0.13f), lampWarm, default(Vector3), false);
+            if (hanging)
+                Prim(go.transform, name + "_Hook", PrimitiveType.Cylinder, new Vector3(0f, 0.18f, 0f),
+                     new Vector3(0.02f, 0.12f, 0.02f), metalDark, default(Vector3), false);
+            return l;
+        }
+    }
+
+    // ------------------------------------------------------------- Tom's camp
+    /// <summary>
+    /// Finds a clear patch near <see cref="CampTarget"/> and builds the camp there. Returns
+    /// the point Expedition spawns the case on -- the case itself is a run-time object, like
+    /// the loot, so a rebuild can never lose it or bake a hole round it.
+    /// </summary>
+    static Transform BuildTomsCamp(Transform props, Transform headlight)
+    {
+        Physics.SyncTransforms();   // the trunks and rocks were created moments ago
+
+        Vector2 spot = CampTarget;
+        bool found = false;
+        for (float r = 0f; r <= 8f && !found; r += 1f)
+        {
+            int steps = r == 0f ? 1 : 12;
+            for (int i = 0; i < steps; i++)
+            {
+                float a = i / (float)steps * Mathf.PI * 2f;
+                Vector2 p = CampTarget + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+
+                // A couple of metres clear of trunks and rocks, so the case is not wedged
+                // against a tree. The box starts above the ground, so the ground never counts.
+                if (Physics.CheckBox(new Vector3(p.x, GroundTop + 1.1f, p.y), new Vector3(1.8f, 0.9f, 1.8f))) continue;
+
+                spot = p;
+                found = true;
+                break;
+            }
+        }
+        if (!found) Debug.LogWarning("No clear spot for Tom's camp near " + CampTarget + "; placing it anyway.");
+
+        Transform camp = Group(props, "TomsCamp");
+        camp.localPosition = new Vector3(spot.x, GroundTop, spot.y);
+        // Facing back towards the house: he was on his way home.
+        camp.localEulerAngles = new Vector3(0f, Mathf.Atan2(-spot.x, -spot.y) * Mathf.Rad2Deg, 0f);
+
+        Transform point = Group(camp, "CasePoint");
+        point.localPosition = new Vector3(0.4f, 0.02f, 0.3f);
+        point.localEulerAngles = new Vector3(0f, 17f, 0f);
+
+        // What he left: no body and no light, just what you drop when you run. All
+        // render-only, so the camp stays walkable and bakes like open ground.
+        Box(camp, "Camp_Scuff", -1.4f, 1.4f, 0f, 0.015f, -1.2f, 1.2f, dirt, false);
+        Prim(camp, "Camp_Coat", PrimitiveType.Cube, new Vector3(1.15f, 0.03f, -0.55f),
+             new Vector3(0.7f, 0.05f, 0.95f), fabric, new Vector3(0f, -24f, 4f), false);
+
+        // His lantern, on its side and long out of oil.
+        Transform lantern = Group(camp, "Camp_Lantern");
+        lantern.localPosition = new Vector3(-0.65f, 0.085f, -0.25f);
+        lantern.localEulerAngles = new Vector3(0f, 35f, 90f);
+        Prim(lantern, "Lantern_Glass", PrimitiveType.Cylinder, Vector3.zero, new Vector3(0.15f, 0.12f, 0.15f), lampDead, default(Vector3), false);
+        Prim(lantern, "Lantern_Cap", PrimitiveType.Cylinder, new Vector3(0f, 0.13f, 0f), new Vector3(0.17f, 0.02f, 0.17f), metalDark, default(Vector3), false);
+        Prim(lantern, "Lantern_Base", PrimitiveType.Cylinder, new Vector3(0f, -0.13f, 0f), new Vector3(0.17f, 0.02f, 0.17f), metalDark, default(Vector3), false);
+
+        // The tin he marked the trees from, and what spilled when it went over.
+        Prim(camp, "Camp_PaintTin", PrimitiveType.Cylinder, new Vector3(-0.3f, 0.07f, 0.95f),
+             new Vector3(0.12f, 0.07f, 0.12f), metalPale, default(Vector3), false);
+        Box(camp, "Camp_PaintSpill", -0.2f, 0.25f, 0.016f, 0.02f, 0.9f, 1.25f, paint, false);
+
+        // The last mark is an X, like the one on the notice's sketch.
+        Collider marked = NearestTrunk(camp.position, 4.5f, null);
+        if (marked != null) PaintCross(camp, marked, camp.position);
+
+        PaintTrail(headlight, camp.position, marked);
+        return point;
+    }
+
+    // Tom's paint marks: from the wreck's headlight to his camp. The beam shows where the
+    // way starts; the marks carry on past where it gives out, and veer west -- the way he
+    // actually went. Pale, so faint by moonlight and plain in a torch beam.
+    const float TrailStart = 4f;       // first mark this far along the beam
+    const float TrailBend = 10f;       // where the marks leave the beam's line
+    const float TrailSpacing = 4f;     // close enough that the next mark is in the torch beam
+    const float TrailReach = 4.5f;     // how far from the line a marked tree may stand
+
+    static void PaintTrail(Transform headlight, Vector3 camp, Collider crossed)
+    {
+        Vector3 along = headlight.forward;
+        along.y = 0f;
+        along.Normalize();
+
+        Vector3[] route =
+        {
+            Flat(headlight.position + along * TrailStart),
+            Flat(headlight.position + along * TrailBend),
+            Flat(camp)
+        };
+
+        float total = 0f;
+        for (int i = 1; i < route.Length; i++) total += Vector3.Distance(route[i - 1], route[i]);
+
+        // The tree with the X on it is already marked; it must not get a band as well.
+        HashSet<Collider> used = new HashSet<Collider>();
+        if (crossed != null) used.Add(crossed);
+        int marks = 0;
+
+        // Stops short of the camp: the X there is the last mark.
+        for (float d = 0f; d < total - 3f; d += TrailSpacing)
+        {
+            Collider trunk = NearestTrunk(PointAlong(route, d), TrailReach, used);
+            if (trunk == null) continue;
+            used.Add(trunk);
+
+            // A band round the trunk, parented to the tree so it follows the lean.
+            Prim(trunk.transform.parent, "PaintMark", PrimitiveType.Cylinder, new Vector3(0f, 1.5f, 0f),
+                 new Vector3(0.34f, 0.06f, 0.34f), paint, default(Vector3), false);
+            marks++;
+        }
+
+        if (marks < 3) Debug.LogWarning("Only " + marks + " trees found along Tom's trail; the way to the camp is barely marked.");
+
+        Vector3 Flat(Vector3 v) { return new Vector3(v.x, 0f, v.z); }
+    }
+
+    static Vector3 PointAlong(Vector3[] route, float distance)
+    {
+        for (int i = 1; i < route.Length; i++)
+        {
+            float len = Vector3.Distance(route[i - 1], route[i]);
+            if (distance <= len) return Vector3.Lerp(route[i - 1], route[i], len <= 0f ? 0f : distance / len);
+            distance -= len;
+        }
+        return route[route.Length - 1];
+    }
+
+    /// <summary>The tree trunk nearest a point on the ground, within reach, skipping any already used.</summary>
+    static Collider NearestTrunk(Vector3 near, float reach, HashSet<Collider> used)
+    {
+        Collider best = null;
+        float bestSqr = reach * reach;
+
+        foreach (Collider c in Physics.OverlapSphere(new Vector3(near.x, GroundTop + 1.2f, near.z), reach))
+        {
+            if (c.name != "Trunk" && c.name != "Snag") continue;
+            if (used != null && used.Contains(c)) continue;
+
+            Vector3 d = c.bounds.center - near;
+            d.y = 0f;
+            if (d.sqrMagnitude < bestSqr)
+            {
+                bestSqr = d.sqrMagnitude;
+                best = c;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Two painted strokes on the side of a trunk that faces <paramref name="toward"/>.</summary>
+    static void PaintCross(Transform parent, Collider trunk, Vector3 toward)
+    {
+        Vector3 centre = trunk.bounds.center;
+        Vector3 facing = toward - centre;
+        facing.y = 0f;
+        facing.Normalize();
+
+        // Onto the bark itself, so a leaning trunk still gets its X on the surface.
+        Vector3 probe = new Vector3(centre.x, GroundTop + 1.45f, centre.z) + facing;
+        Vector3 surface = trunk.ClosestPoint(probe) + facing * 0.012f;
+        Quaternion flat = Quaternion.LookRotation(-facing);
+
+        for (int i = 0; i < 2; i++)
+        {
+            GameObject stroke = Prim(parent, "Camp_PaintX" + i, PrimitiveType.Cube, Vector3.zero,
+                                     new Vector3(0.05f, 0.42f, 0.015f), paint, default(Vector3), false);
+            stroke.transform.position = surface;
+            stroke.transform.rotation = flat * Quaternion.Euler(0f, 0f, i == 0 ? 35f : -35f);
+        }
+    }
+
+    /// <summary>
+    /// They pace the edge of the light every night, so the grass there is worn to dirt: the
+    /// safe-zone rule written on the ground before a monster is ever seen. Broken rather than
+    /// drawn, and render-only, so it costs no collision and no bake.
+    /// </summary>
+    static void TrampledRing(Transform parent, Vector3 centre, float radius)
+    {
+        Transform ring = Group(parent, "TrampledRing");
+        const int segments = 56;
+        float step = Mathf.PI * 2f / segments;
+
+        for (int i = 0; i < segments; i++)
+        {
+            if (Random.value < 0.3f) continue;
+
+            float a = i * step + Random.Range(-0.02f, 0.02f);
+            float r = radius + Random.Range(-0.35f, 0.35f);
+            Vector3 p = new Vector3(centre.x + Mathf.Cos(a) * r, GroundTop + 0.007f, centre.z + Mathf.Sin(a) * r);
+
+            // Long axis along the circle's tangent, (-sin a, cos a).
+            float yaw = Mathf.Atan2(-Mathf.Sin(a), Mathf.Cos(a)) * Mathf.Rad2Deg + Random.Range(-6f, 6f);
+            Prim(ring, "Trample_" + i, PrimitiveType.Cube, p,
+                 new Vector3(Random.Range(0.5f, 0.9f), 0.014f, step * radius * Random.Range(0.6f, 0.95f)),
+                 dirt, new Vector3(0f, yaw, 0f), false);
+        }
     }
 
     // ------------------------------------------------- gameplay objects + mood
@@ -995,14 +1291,79 @@ public static class PrototypeEnvironmentBuilder
         if (clock != null)
         {
             Undo.RecordObject(clock, "Retune TimeOfDay");
-            clock.startPhase = DayPhase.Night;   // the prototype opens in the dark
-            clock.nightIntensity = 0.09f;        // a sliver of moon, not a blue day
-            clock.nightAmbient = 0.05f;
-            clock.nightColor = new Color(0.42f, 0.52f, 0.82f);
+
+            // Enough moon to walk by and to throw canopy shadows, still unmistakably night.
+            // The numbers look high because every albedo here is near-black (0.035-0.1).
+            clock.nightIntensity = 0.55f;
+            clock.nightColor = new Color(0.55f, 0.65f, 0.95f);
+            clock.moonYaw = 30f;                 // shines from the south-west onto the porch side
+            clock.moonElevation = 40f;
+            clock.nightAmbient = 1.8f;
+            clock.nightAmbientColor = new Color(0.30f, 0.38f, 0.60f);
             if (clock.sun == null && sunGo != null) clock.sun = sunGo.GetComponent<Light>();
 
-            // Preview night in the Scene view without entering Play mode.
-            clock.SetCycleTime(clock.dayLength + clock.duskLength + clock.nightLength * 0.4f);
+            // Light the Scene view as the game will, without entering Play mode.
+            clock.ApplyLighting();
+        }
+
+        // --- the forest darkens with distance from the generator ---------------
+        Camera eye = player.GetComponentInChildren<Camera>();
+        if (eye != null)
+        {
+            NightDepth depth = eye.GetComponent<NightDepth>();
+            if (depth == null) depth = Undo.AddComponent<NightDepth>(eye.gameObject);
+            Undo.RecordObject(depth, "Wire NightDepth");
+            depth.centre = generator.transform;
+        }
+        else
+        {
+            Debug.LogError("Player has no camera; NightDepth was not added.");
+        }
+
+        // --- a standby lamp on the generator, lit whether it runs or not ------------
+        // Its work lights die with the fuel, which is exactly when you have to find it.
+        // Under Props, so a rebuild replaces it instead of stacking a second one.
+        GameObject props = Find("Props");
+        if (props != null)
+        {
+            GameObject standby = new GameObject("Gen_StandbyLamp");
+            standby.transform.SetParent(props.transform, false);
+            standby.transform.position = generator.transform.TransformPoint(new Vector3(-0.4f, 0.72f, -0.46f));
+
+            Light l = standby.AddComponent<Light>();
+            l.type = LightType.Point;
+            l.color = new Color(1f, 0.55f, 0.18f);
+            l.intensity = 0.6f;
+            l.range = 3.5f;
+            l.shadows = LightShadows.None;
+
+            Prim(standby.transform, "Gen_StandbyLamp_Bulb", PrimitiveType.Sphere, Vector3.zero,
+                 new Vector3(0.06f, 0.06f, 0.06f), lampWarm, default(Vector3), false);
+
+            // Read from the generator's own radius, never hardcoded, so it cannot drift.
+            if (gen != null) TrampledRing(props.transform, generator.transform.position, gen.protectionRadius);
+        }
+
+        // --- Tom's camp: where the case is put out when the level starts ----------
+        Expedition expedition = systems.GetComponent<Expedition>();
+        if (expedition != null)
+        {
+            Undo.RecordObject(expedition, "Wire Expedition");
+            expedition.campPoint = campPoint;
+        }
+        else
+        {
+            Debug.LogWarning("No Expedition on Systems: Tom's case will never appear, so Level 1 cannot be finished.");
+        }
+
+        // --- loot: deep means far from the generator, and the guaranteed Large piece
+        // turns up near Tom's camp, so the prize and the case compete for the same trip.
+        LootSpawner loot = systems.GetComponent<LootSpawner>();
+        if (loot != null)
+        {
+            Undo.RecordObject(loot, "Wire LootSpawner depth");
+            loot.depthCentre = generator.transform;
+            loot.focus = campPoint;
         }
 
         MonsterSpawner spawner = systems.GetComponent<MonsterSpawner>();
@@ -1014,7 +1375,7 @@ public static class PrototypeEnvironmentBuilder
             spawner.minDistanceFromPlayer = 26f;
         }
 
-        // The moon itself, in case the clock is ever paused mid-day.
+        // The moon itself.
         if (sunGo != null)
         {
             Light sun = sunGo.GetComponent<Light>();
@@ -1057,7 +1418,7 @@ public static class PrototypeEnvironmentBuilder
             RenderSettings.skybox = m;
         }
 
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Skybox;   // TimeOfDay scales this
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;   // TimeOfDay drives the colours
         RenderSettings.reflectionIntensity = 0.15f;
         DynamicGI.UpdateEnvironment();
         AssetDatabase.SaveAssets();

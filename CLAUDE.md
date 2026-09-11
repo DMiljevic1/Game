@@ -39,7 +39,7 @@ The `unity-mcp` tools drive the **live Editor**. That is the primary way to chan
   `Forest`, `Props` and `LootSpawnPoints` from scratch out of primitives. Change the level by editing that script and
   re-running it, not by dragging cubes — a re-run destroys every root outside its `Keep` set
   (`Player`, `Systems`, `Directional Light`, `Global Volume`, `Generator`, `PlayerRespawn`, `FuelCans`,
-  `Flashlight`, `SellStation`, `Store`, `Valuables`),
+  `Flashlight`, `SellStation`, `Store`, `Valuables`, `PatrolRoute`, `Monster_Test`),
   so anything hand-placed elsewhere is lost. It is deterministic (`Random.InitState`), so the same
   seed gives the same forest.
 - `House` is one abandoned building centred on the origin, 14 × 11, split by a south→north hallway:
@@ -74,29 +74,75 @@ journal fragments and a map that reveal where the next house is. Survival over c
 
 **Co-op is the target, single-player is the current stage.** Write every system netcode-shaped:
 one authority object owns each piece of shared state, no per-player statics, no game logic living
-in UI. `TimeOfDay.HasAuthority` is the pattern — a seam that becomes `IsServer` when Netcode lands.
+in UI. `Wallet.HasAuthority` is the pattern — a seam that becomes `IsServer` when Netcode lands.
 
-### TimeOfDay — the level clock
+### Level 1 — bring Tom's case home
 
-`Assets/Scripts/TimeOfDay.cs` on the `Systems` object is the **single authoritative clock**.
-Every time-dependent system (generator drain, monster spawning, ambience) reads it and never
-keeps its own timer.
+The whole objective, and deliberately nothing more: **find Tom's case at his camp in the deep woods
+and open it at the kitchen table.** No quest UI, markers, stages, timer or scripted events — the
+tension comes from the systems (fuel, depth, weight, noise). The loot/store loop runs alongside it
+untouched, and the level can be finished with every optional story element ignored.
 
-- Phases: Day 8:00 → Dusk 2:00 → Night 5:00 → Dawn 1:00 (a 16-minute cycle), scaled by `timeScale`.
-- Subscribe to `OnPhaseChanged` / `OnDayStarted`; query `Phase`, `IsNight`, `IsDark`, `TimeUntilPhaseEnd`.
-- Sunrise (06:00) and sunset (18:00) fall in the **middle** of dawn and dusk, so those phases are
-  the light actually changing. Don't remap hours without preserving that.
-- Only the authority advances time. `SetCycleTime` exists for client mirroring and editor preview.
+| Piece | Owner | Where |
+|---|---|---|
+| Objective state, spawning the case, completion | `Expedition` (authority, `Instance`, `HasAuthority`) | Systems |
+| The case | `TomsCase` (a `Carryable`, **not** a `Valuable`) | `Assets/Prefabs/Objective/TomsCase.prefab`, spawned at run time on `Props/TomsCamp/CasePoint` |
+| Where it is opened | `CaseTable` (`IInteractable`, **E**) | `House/Furniture/Kitchen/KitchenTable`, added by the environment builder |
+| The ending screen | `LevelCompleteHud` (pure observer) | Systems |
+| The one mandatory note | `Readable` on `House/Detail/Notice`, drawn by the player's `ReadableHud` | builder / Player |
+
+- **The case is the Large load.** `Carryable.ApplyLargeLoad` is the one copy of the Large numbers,
+  shared with `ValuableSize.Large`: 3.1 walk (slower than chase 3.6), no sprint, no pack — so no
+  torch in hand while carrying it. Retune it with the television and `chaseSpeed`, never alone.
+- **Taking it is loud, once.** The first lift emits `liftNoiseRadius` (30 m) from where it lay — an
+  ordinary `Noise`, a lure, never a spawn. Estimated ~1.2 of the 5 monsters are in earshot at a
+  random moment (26% none, 33% two or more). Picking it up again after a drop is as quiet as anything.
+- Everything else it needs already existed: dying drops it where you fell, the sell counter ignores
+  it (not a `Valuable`), and the carrying line says `(too heavy to run)`.
+- `CaseTable` offers **E "Open Tom's case"** only while you hold it — the generator-refuel pattern —
+  then `ConsumeCarried`, `TomsCase.OpenAt` on its `CaseRest`, `Expedition.CompleteLevel`. There is no
+  scene change yet: `LevelCompleteHud` shows the map for `fullSeconds`, then shrinks to
+  `Hud.RowRight(2)`. The map is deliberately vague about "2" — Level 2 is not decided.
+- **Tom's camp** is built by `PrototypeEnvironmentBuilder.BuildTomsCamp` on the first clear spot near
+  `CampTarget` (−18, −38): currently (−18.4, −38.4), 41 m from the generator, a 43 m `PathComplete`
+  walk from the entrance (~14 s carrying the case). Its dressing is render-only and **unlit** — the
+  deep forest still has no lights.
+- **Environmental story, all optional:** the notice's sketch → the wreck's headlight → pale
+  `Env_Paint` bands on trunks every ~4 m (`PaintTrail`; faint by moonlight, plain by torch) → a
+  painted X on the tree by the camp. `TrampledRing` wears dirt strips at the generator's radius (read
+  from the component) — the safe-zone rule on the ground. Nina's drawing in the shed is a second,
+  optional `Readable`.
+- **`Readable` holds no state.** Which note is open is the reader's own `ReadableHud`, so two players
+  can read the same notice. It closes when you walk `closeDistance` away; reading never pauses the
+  game. A new note is a collider, a `Readable` and its text.
+- **Known risk:** nothing tells the player the kitchen table is where the case goes. Watch for it in
+  playtests before adding anything.
+
+### TimeOfDay — Level 1 is always night
+
+**There is no day/night cycle.** Level 1 is permanently night: no phases, no clock, no time
+progression, no phase events. `Assets/Scripts/TimeOfDay.cs` on `Systems` sets the night's light
+once in `Awake` — the moon (`sun`, `nightIntensity`, `nightColor`, `moonYaw`, `moonElevation`) and
+the Trilight ambient (`nightAmbientColor` × `nightAmbient`) — and nothing ever changes it.
+
+- Nothing may keep a timer that stands in for the old cycle. Anything that happens "at night"
+  happens from level start (see `MonsterSpawner`).
+- `AmbientSky` / `AmbientEquator` / `AmbientGround` are the base ambient; `NightDepth` scales them.
+- `ApplyLighting()` is public so the environment builder can preview the night in edit mode.
+- The night is fixed, so there is nothing to replicate: every co-op client lights its own scene.
 
 ### Generator — the night's pressure
 
 `Assets/Scripts/Generator.cs` on the `Generator` object beside the country house.
 
 - Ask **`Generator.IsPointProtected(pos)`** — never test a radius by hand. Monsters must respect it.
-- Fuel drain is multiplied by `TimeOfDay.timeScale`, so a tank always lasts the same fraction of a
-  night no matter what speed we test at. Anything else that consumes over time must do the same.
-- Tuning as of now: 100 fuel, 0.25/s = **400s of runtime vs a 300s night** — night 1 is survivable
-  on a full tank, night 2 is not without refuelling. That is the intended teaching curve (doc §16).
+- Fuel drains in real time (`burnRate` × `Time.deltaTime`) while it runs.
+- Tuning as of now: tank 100, 0.25/s = **400s (6:40) on a full tank**. **Level 1 starts it off, at
+  40 fuel (160 s)** — set on the scene's Generator; the environment builder never touches `fuel` or
+  `burnRate`, so an Inspector retune survives a rebuild. The night never ends, so once the tank is
+  dry the light stays off until someone refuels it.
+- `IsInsideAnyRadius(pos)` asks the radius **whether or not it runs** — for decisions about the
+  ground (where monsters may spawn), never about safety right now. Safety is always `IsPointProtected`.
 - Subscribe to `OnRanOutOfFuel` / `OnLowFuel` / `OnStarted` / `OnStopped` rather than polling.
 - `poweredLights` are switched with the running state: protection has to be *visible*.
 - Note: the static registry is filled in `OnEnable`, which does not run in edit mode. Editor-time
@@ -130,7 +176,7 @@ aim is always authoritative. Otherwise everything within `range` is gathered wit
 
 | Key | Action | Declared by |
 |---|---|---|
-| **E** | open / close doors, sell at the counter, **and** open / close the store | `DoorInteraction.useKey`, `SellStation.sellKey`, `Store.browseKey` |
+| **E** | open / close doors, sell at the counter, open / close the store, revive a body, read a note, **and** open Tom's case | `DoorInteraction.useKey`, `SellStation.sellKey`, `Store.browseKey`, `PlayerBody.reviveKey`, `Readable.readKey`, `CaseTable.openKey` |
 | **F** | pick up an item, and pour fuel in | `Carryable.pickUpKey`, `Generator.refuelKey` |
 | **Q** | drop what you are holding | `PlayerInteractor.dropKey` |
 | **T** | start / stop the generator | `Generator.powerKey` |
@@ -164,8 +210,8 @@ fire alongside a slot swap.
   `PlayerVitals` still knows nothing about carrying. The item is never destroyed, never teleported to
   the counter and never auto-sold — it becomes an ordinary world pickup, keeping its script, value
   and prompt, so recovering your own loot is a trip back out. Dying empty-handed does nothing.
-  `PlayerVitals` records `LastDeathPosition` *before* `Respawn` moves the player, so a handler never
-  has to rely on running before the teleport. Co-op: the item goes back to the world rather than to
+  `PlayerVitals` records `LastDeathPosition` before `OnDied` fires, and the body is left on the
+  same spot (see *Death and revive*). Co-op: the item goes back to the world rather than to
   another player, so there is no per-player ownership to replicate — this becomes a server-side call
   and the item's transform is all a client needs.
 - **A held item gets keys too.** Each frame the router also asks the carried item for its options and
@@ -213,9 +259,9 @@ selection **and nothing else — the hands still belong to `PlayerInteractor`.**
   by name. A cleared one can be picked up and carried normally but can never occupy a slot, so
   `CanStowCarried` is false, `CanPickUp` is false, and you cannot pick anything else up until you
   put it down. A number key with one in your hands does nothing at all: it is not swapped away and
-  it is *not* dropped for you. `ValuableSize.Large` clears it in `ApplySizePreset`, so the
-  television is automatically hands-only — retune that with the Large movement numbers, not
-  separately. `Custom` leaves it as authored.
+  it is *not* dropped for you. `ValuableSize.Large` clears it through the shared
+  `Carryable.ApplyLargeLoad`, so the television (and Tom's case) are automatically hands-only —
+  retune that with the Large movement numbers, not separately. `Custom` leaves it as authored.
 - `PlayerInteractor.PickUpRefusalReason` distinguishes the two refusals ("hands and pack full" vs
   "put the old CRT television down first") because they need different actions from the player.
   `Carryable.PickUpRefusal` puts it on the prompt for every item for free.
@@ -230,14 +276,20 @@ selection **and nothing else — the hands still belong to `PlayerInteractor`.**
 
 ### Economy as of now
 
-Generator tank 100. A full night costs **75** fuel. A can holds **40**. So one can buys roughly half
-a night, and a full tank plus one can does not quite cover two nights — refuelling is a recurring
-trip, not a one-off errand. Retune these together, never one alone.
+Generator tank 100 at 0.25/s, so a full tank runs **400 s**. A can holds **40** = **160 s** more. The
+level starts at **40 fuel (160 s), switched off**; the four placed cans add **640 s** (two in the
+light, two at its edge), and after that fuel comes only from the store at **$50 a can**. So the loop
+is loot → money → fuel/equipment → further out. The night has no end, so refuelling is a recurring
+trip, not a one-off errand. Retune these together, never one alone — and against the haul (see
+*Loot spawning*), which is **not balanced yet**.
 
 ### Monsters
 
-`MonsterSpawner` on `Systems` spawns a wave at **dusk** and clears it at **dawn** — "they don't come
-during the day" is true in the simulation, not just in the journal. `Assets/Prefabs/Monster.prefab`.
+`MonsterSpawner` on `Systems` spawns one wave of `waveSize` (4) in `Start` and never clears it — it
+is always night, so they are out from the first frame. The hand-placed `Monster_Test` is extra to
+that wave. `Assets/Prefabs/Monster.prefab`. Spawn points avoid the generator's radius through
+`Generator.IsInsideAnyRadius`, not `IsPointProtected`: the generator starts the level off, and a
+wave spawned in the yard before anyone could start it would be no choice at all.
 
 **The monster is blind.** It has no vision and never touches the player's transform — the only way
 anything reaches it is `Noise` (see below). `Monster` implements `INoiseListener`; there is no
@@ -380,9 +432,52 @@ exactly one health system — `PlayerVitals` — and one readout, `Hud.Row(3)`.
 - Effect strength scales with `PlayerVitals.LastDamageAmount` against `damageForFullEffect` (25,
   the monster's hit), floored at `minimumIntensity` — a small scratch still registers.
 
+### Death and revive
+
+Death is a **state**, not a teleport. A dead player stays dead until someone brings their body
+home and uses **Adrenaline** on it. The pieces are deliberately separate, and each is replaceable:
+
+| Concern | Owner | Where |
+|---|---|---|
+| Alive / dead, health, `ReviveAt`, `Respawn` | `PlayerVitals` | Player |
+| Controls, avatar colliders and renderers off while dead | `PlayerDeathLock` (pure observer) | Player |
+| The body left in the world | `PlayerBody` (a `Carryable`) | `Assets/Prefabs/PlayerBody.prefab`, spawned at run time |
+| Revival item | `Adrenaline` (a `Carryable`, `IStorePriced`) | `Assets/Prefabs/Store/Adrenaline.prefab` |
+| Revive rules, the revive itself, bodies, price curve | `Revival` (authority, `RevivePricing`) | Systems |
+| Revives used this run, who is alive, all-dead | `RunState` (authority) | Systems |
+| "The safe house" | `ReviveZone` (a box, not a collider) | `House`, generated by the environment builder |
+| What singleplayer does when everyone is dead | `SingleplayerDeathFallback` | Systems — **delete when co-op lands** |
+
+- **`PlayerVitals` knows none of the others.** It fires `OnDied` / `OnRevived`, plus the static
+  `AnyDied` / `AnyRevived` for run-level listeners, and keeps a static `All` registry of players (a
+  scene registry like `Generator`'s, not per-player state). Nothing else writes health.
+- **The body is its own object, not the player's.** So the player object is free to become a
+  spectator later, and the body is an ordinary hands-only `Carryable` (television weights: 0.62 walk,
+  no sprint, no pack). Carrying a teammate home is the same pick-up/put-down as anything else; a
+  future body teleporter only has to move an un-held body's transform — `Revival` never asks how it got there.
+- **`Revival.ReviveRefusal` is the single definition of "allowed"**, read by both the prompt and
+  `TryRevive`: body on the ground, inside a `ReviveZone`, rescuer holding `Adrenaline`, rescuer alive.
+  The body's pickup prompt always says which one is missing.
+- **The counter is global for the run and lives on `RunState`.** It resets in `Awake`, so every level
+  load is a new run; `BeginRun()` exists for a new run without a reload. Only `Revival.TryRevive`
+  calls `RecordRevive`, and only after a successful revive.
+- **Price = `RevivePricing.PriceFor(revivesUsed + unspent Adrenaline)`.** Counting unspent doses
+  (`priceIncludesUnspentAdrenaline`) is what stops a team buying four at $500 before anyone dies.
+  Retune the `prices` list on `Revival`; past its end each revive costs `growthPastList` × the last.
+- A revive stands the owner up at the body with `reviveHealthFraction` (0.5) — the house regenerates
+  the rest. The body and the dose are destroyed; the dose leaves `Adrenaline.UnspentCount` immediately.
+- `PlayerDeathLock` re-disables the controls **every frame** while dead, because the store restores
+  what it suspended when it closes, and dying with the store open would otherwise hand a corpse its legs back.
+- **Singleplayer:** every death is "all players dead". `SingleplayerDeathFallback` listens to
+  `RunState.OnAllPlayersDead` and after `standInDelay` (4 s) `Respawn`s the player at the house to
+  act as their own rescuer. The body stays, so fetch → buy → revive is fully playable. In co-op this
+  component is removed and `OnAllPlayersDead` becomes Game Over.
+- One body per player: a new death replaces that player's old body (only reachable in singleplayer).
+- What is in the hands still drops where you fell; **pack slots survive a death**, as before.
+
 ### Money and selling
 
-`Wallet` on `Systems` is the **single authority on money** — the same shape as `TimeOfDay`, with a
+`Wallet` on `Systems` is the **single authority on money** — the same shape as `RunState`, with a
 `HasAuthority` seam and a static `Instance`. Money is shared by the team, not per-player, so there is
 exactly one Wallet in the level. Everything that pays out goes through `Wallet.Add`; `SetMoney` exists
 only for client mirroring and editor preview.
@@ -421,7 +516,7 @@ Price is only half a loot item; the other half is what carrying it costs you.
 |---|---|---|---|---|
 | `Small` | 5.0 (×1) | 9.0 (×1) | yes | old radio $40, camera $60, old clock $75 |
 | `Medium` | 4.5 (×0.9) | 8.1 (×0.9) | yes | laptop $150 |
-| `Large` | 3.1 (×0.62) | **none** | **no** | old CRT television $300 |
+| `Large` | 3.1 (×0.62) | **none** | **no** | old CRT television $300 — and Tom's case (not loot), through the same `Carryable.ApplyLargeLoad` |
 
 - The Large numbers are chosen against the monster: chase speed is **3.6**, so 3.1 means the
   television is the one thing you cannot outrun. That is the risk/reward, not a balance accident —
@@ -472,13 +567,20 @@ lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
 | Flashlight | 60 | The existing `Flashlight`: beam range 32, spot 42°, intensity 70 |
 | Better Flashlight | 180 | The same script, stronger beam: range **55**, spot **58°**, intensity **160**, whiter |
 | Shovel | 90 | A plain `Carryable`. No behaviour yet — the gameplay comes later |
+| Adrenaline | **the next revive price** (500 → 750 → 1,100 → 1,500 …) | `Adrenaline` prices itself through `IStorePriced`; see *Death and revive* |
+| Fuel can | **50** | A detached copy of the scene cans (`FuelCan`, 40 fuel = 160 s). The only fuel once the four placed cans are used |
+
+- `StoreItem.CurrentPrice` is what is shown and charged, never `price` directly. A prefab that
+  implements `IStorePriced` works its own price out; everything else uses the listed number.
+  `TryBuy` reads the price **once, before spawning**, because Adrenaline is dearer the moment it exists.
 
 - **The torch is store-only and no longer lies on the house floor.** The `Flashlight` scene root was
   removed when the store was added; buying one is how a run gets a light. Don't re-place one by hand.
-- All three set `NavMeshModifier.ignoreFromBuild`, like every other carryable, so a dropped one never
-  carves a hole in the mesh.
-- Prices sit against an average haul of ~$501 a run: the basic torch is a first-night purchase, the
-  better one costs most of a good run. Retune them against that number, not on their own.
+- Every store prefab sets `NavMeshModifier.ignoreFromBuild`, like every other carryable, so a dropped
+  one never carves a hole in the mesh.
+- Prices were set against the old ~$501 haul. With the guaranteed Large piece it is now **~$727**, of
+  which only **~$103** lies inside the generator's light. **Not rebalanced yet** — retune against a
+  playtest, and never one price on its own.
 
 #### Loot spawning — rarity is derived, position is shuffled
 
@@ -493,21 +595,30 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
 - `minimumWeight` (0.01) is a floor, so nothing can ever become unfindable however dear it gets.
 - `MaxPerRun` is derived from size too (Small 3 / Medium 2 / Large 1), so the cheap stuff cannot
   flood the map and there is never more than one television.
-- **Measured over 20,000 simulated runs** with the defaults (`commonValue` 40, exponent 1.4,
-  6–9 items a run, averaging 7.5):
+- **At least `minLargePerRun` (1) Large piece a run.** `GuaranteeLarge` draws it from the table by
+  weight among the Large kinds — *which* one is still derived, only *whether* is fixed — and it
+  replaces the cheapest piece on a Large-capable spot, so the item count is unchanged. Then the
+  **first Large piece, however it was drawn, moves beside `focus`** (Tom's camp, within
+  `focusRadius` 15 m), so the prize and the case always compete for the same trip. Never a scripted spawn.
+- **Depth re-pairs; it never re-rolls.** The table and the shuffle choose the same items and spots as
+  always; `AssignByDepth` then sends dearer pieces to spots further from `depthCentre` (the
+  generator), blurred by chance by `1 − depthBias` (0.75). So rarity, caps and separation are
+  untouched, and `depthBias` 0 is the old behaviour. The builder wires `depthCentre` and `focus`.
+- **Measured over 2,000 runs of the real `SpawnRun`** with the defaults (`commonValue` 40, exponent
+  1.4, 6–9 items a run, averaging 7.5):
 
-  | item | price | size | weight | avg/run | runs containing it |
+  | item | price | size | avg/run | runs containing it | avg distance from generator |
   |---|---|---|---|---|---|
-  | old radio | 40 | Small | 1.000 | 2.75 | 99.5% |
-  | camera | 60 | Small | 0.567 | 2.25 | 96.6% |
-  | old clock | 75 | Small | 0.415 | 1.86 | 92.2% |
-  | laptop | 150 | Medium | 0.110 | 0.53 | **43.3%** |
-  | old CRT television | 300 | Large | 0.027 | 0.13 | **12.8%** |
+  | old radio | 40 | Small | 1.88 | 96.4% | 16 m |
+  | camera | 60 | Small | 2.24 | 96.4% | 27 m |
+  | old clock | 75 | Small | 1.88 | 92.0% | 39 m |
+  | old CRT television | 300 | Large | 1.00 | **100%** (by the camp in 100%) | 40 m |
+  | laptop | 150 | Medium | 0.51 | 42.4% | 44 m |
 
-  So a television turns up about **one run in eight** and a laptop in **two runs in five**, and the
-  average haul lying in the level is **$501**. Note the caps compress the three cheap items towards
-  each other — the raw curve is 47/27/20 per draw, but at 7.5 draws against a cap of 3 they realise
-  closer to 37/30/25. That is the caps doing their job, not the curve misfiring.
+  Average haul **$727**; only **2.2 items (~$103)** lie inside the generator's 22 m. The laptop's
+  42% matches the unguaranteed table's 43% — the check that depth changes where, not what. The caps
+  still compress the cheap items towards each other (the raw curve is 47/27/20 per draw); that is
+  the caps doing their job. **Not balanced yet.**
 - **`TryResolveSurface` is the single definition of a valid spot** and the editor tool calls this
   same runtime method rather than reimplementing it, so what is authored and what is used cannot
   drift. It raycasts down, rejects faces steeper than `maxSurfaceSlope`, then overlap-boxes
@@ -528,8 +639,10 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
 (**Lab ▸ Loot ▸ Rebuild Loot Spawn Points**) generates the `LootSpawnPoints` root and
 **`Build Prototype Environment` re-runs it**, so a rebuilt house never leaves points in its new walls.
 
-- It samples a jittered grid over the whole house footprint plus two rings (yard 9–20m, field
-  20–34m) and keeps whatever survives the probe. **It deliberately does not describe the rooms** —
+- It samples a jittered grid over the whole house footprint plus three rings round the house (yard
+  9–20m, field 20–34m, deep 34–46m) and one round Tom's camp (3.5–14m, found at `Props/TomsCamp` —
+  the woods there are dense, and the deep ring alone left two Large-capable spots), and keeps
+  whatever survives the probe. **It deliberately does not describe the rooms** —
   the probe rejects walls, partitions and furniture on its own, so what remains is exactly the
   walkable floor and the tops of the furniture.
 - **Each region has its own cap.** A single shared budget is spent by whichever region is sampled
@@ -538,18 +651,63 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
 - Expanding means adding a region there, or dropping a `LootSpawnPoint` in by hand: the spawner
   takes every one it can find, wherever it is parented.
 
+### Lighting — a night you can walk by, woods that get darker
+
+The goal: without a torch you can navigate and read the house, trees, paths and props, and it
+still feels like night; the deeper into the woods, the darker, until the torch is what you see by.
+
+- **`TimeOfDay` owns the moon and the ambient.** There is one directional light, fixed as the moon
+  (`moonYaw`, `moonElevation`), so the canopy still throws shadows. There is no sun and no day.
+- **Ambient is a Trilight gradient, not the skybox.** The night sky is near-black, and skybox ambient
+  only refreshed on `DynamicGI.UpdateEnvironment`, so writing `ambientIntensity` did nothing
+  reliable. Gradient colours apply immediately. `TimeOfDay` forces the mode; don't switch it back.
+  Equator is 0.7 of the sky colour and ground 0.3 — the strong equator is what lets trunks, walls
+  and canopies read, because with near-black albedo a weak one leaves them as cut-outs.
+- Night tuning (set by the environment builder): moon **0.55**, `nightAmbient` **1.8** × (0.30, 0.38,
+  0.60). These look high because every albedo in the level is 0.035–0.1. Retune against captures,
+  not by eye in the Inspector.
+- **`NightDepth` on `Main Camera` is the whole "further from the house, darker" gradient**, measured
+  from the `Generator` with a smoothstep from `clearRadius` 18 m to `deepRadius` 45 m. It scales the
+  ambient down to `deepAmbient` (0.3) and thickens fog from 0.022 to 0.055. **Ambient does most of
+  the work on purpose:** fog dims the torch beam as much as the moonlight, so darkening the woods
+  with fog alone would make the torch useless exactly where it is needed. It is a per-viewer visual
+  (nothing in the simulation reads fog or ambient), so in co-op each client runs its own. Each
+  `LateUpdate` it writes `TimeOfDay`'s base ambient × its depth factor, never a multiple of what is
+  already in `RenderSettings`, so it cannot compound — never write ambient from anywhere else.
+- **Where the light is, and deliberately isn't.** The generator circuit (house lamps, work and porch
+  lights) is steady and switched by `Generator`. Three old lamps on their own dying supply carry
+  `LightFlicker`: `Props/Lamps/PathLamp` where the path leaves the trees, `Props/Shed/ShedLamp`, and
+  `Props/WreckedCar/Car_Headlight` (a spot staring into the woods). `Props/Gen_StandbyLamp` is a
+  small steady amber lamp that stays lit when the fuel runs out — the moment you most need to find
+  the generator. All of them sit within ~25 m of the house; **the deep forest has none, and should
+  keep having none.** Never put lights on trees.
+- `LightFlicker` never goes on a generator-powered light (protection must read as steady), and it
+  draws from its own `System.Random`, so a lamp can never shift the stream the spawners use.
+- Window panes cast no shadows, so a lit room throws window-shaped light onto the yard. The boards
+  over the boarded windows still cast, which is what slats that light.
+- Shadow budget: a shadowed point light costs six atlas slices, so the old lamps are shadowless and
+  only the headlight (a spot, one slice) casts. `PC_Renderer` is Forward+, so there is no per-object
+  light limit — which matters, because the whole ground is one cube.
+- Measured at night from edit-mode renders (share of near-black pixels, before → after): yard 71% →
+  30%, by the shed 69% → 20%, deep forest 97% → 93%. The deep forest is meant to stay dark.
+
 ### On-screen text
 
 All placeholder HUD goes through `Hud` (`Assets/Scripts/Hud.cs`) — never raw `GUI.Label`, whose
 12px dark-grey default is unreadable against a night field. `Hud.Row(n, text, tint)` for corner
 readouts, `Hud.CentrePrompt(text)` for the interaction prompt. Sizes scale with screen height.
 
-Row numbers are claimed and must not collide. **Left column** (`Hud.Row`): **0-1** TimeOfDay,
-**2** Generator, **3** PlayerVitals, **4** MonsterSpawner, **5 and down** `MonsterDebugHud`
+Row numbers are claimed and must not collide. **Left column** (`Hud.Row`): **0-1** free (the old
+clock readout), **2** Generator, **3** PlayerVitals, **4** MonsterSpawner, **5 and down** `MonsterDebugHud`
 (last noise, then one line per monster — set its `firstRow` if you need row 5 back).
 **Right column** (`Hud.RowRight`):
-**0** money balance, **1** the `+$100` change popup, both drawn by `MoneyHud`. The two columns are
-numbered separately, so they cannot collide. Claim the next free number for a new readout.
+**0** money balance, **1** the `+$100` change popup, both drawn by `MoneyHud`, **2** the
+`LevelCompleteHud` line once the map shrinks away. The two columns are numbered separately, so they
+cannot collide. Claim the next free number for a new readout.
+
+Centred panels — the store, `ReadableHud`'s note, `LevelCompleteHud`'s map — claim no row. Dark text
+on a paper panel uses `Hud.Ink` (no shadow, which would only smear it), and wrapped body text uses
+`Hud.Paragraph`.
 
 The **bottom** of the screen is not row-numbered: `Hud.BottomBarHeight` reserves a strip for the
 inventory bar (`InventoryHud`), and anything else drawing down there keeps clear above it, as the

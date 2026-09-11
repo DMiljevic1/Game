@@ -100,6 +100,23 @@ public class Carryable : MonoBehaviour, IInteractable
     }
 
     /// <summary>
+    /// The "hugged to the chest" load: slower than a chasing monster, no running, never in
+    /// the pack. One copy, shared by Large loot and anything else that heavy (Tom's case),
+    /// so retuning it against the monster's chaseSpeed moves every one of them together.
+    /// </summary>
+    protected void ApplyLargeLoad()
+    {
+        // Slow enough that the monster's 3.6 outpaces the 3.1 this leaves.
+        carryMoveMultiplier = 0.62f;
+        carrySprintMultiplier = 1f;      // unused while sprinting is off
+        allowSprintWhileCarried = false;
+
+        // Too big to shoulder: a whole trip in your hands, never one of four things you
+        // grabbed on the way -- and no torch in hand while you carry it.
+        canBeStoredInInventory = false;
+    }
+
+    /// <summary>
     /// The note explaining why a pickup will be refused, or "". Lives here so every item
     /// says the same thing and a new Carryable gets the wording without knowing a pack
     /// exists -- being unable to pick something up with no explanation reads as a bug.
