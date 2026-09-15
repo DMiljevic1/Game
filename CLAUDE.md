@@ -56,6 +56,34 @@ The `unity-mcp` tools drive the **live Editor**. That is the primary way to chan
 - Only trunks and large rocks carry colliders; canopies, bushes and small debris are render-only, so
   the forest stays cheap to walk through.
 
+### The map — 200 × 200 of woods, one base, and nothing else
+
+`GroundHalf` is **100**, so the playable square is 200 m a side. Walking centre-to-corner is ~140 m.
+**The level is deliberately just forest plus the house and its generator** — there are no landmark
+buildings, no points of interest and no authored places to search. What moves between runs is the
+four key fragments, and nothing else does.
+
+- **Forest is three bands and the density falls with distance** (`ForestInner` 14 → `ForestNear` 55
+  → `ForestMid` 88 → an outer band to `GroundHalf - ForestEdge`). Near woods stay dense because that
+  band has to read as a wall from the porch; the mid band is thinner on purpose. **That is a budget
+  decision, not a look:** at the near density a 200 m map is thousands of renderers and a NavMesh
+  bake to match. If the far woods feel too open, raise the mid count before the density.
+- **The outer band and the undergrowth use `ScatterSquare`, not `Scatter`.** Polar scatter can only
+  fill a *disc*, which on a square map leaves the four corners as open grass — about a quarter of a
+  200 m level, and it reads as the edge of the world. `ScatterSquare` samples the square and rejects
+  anything inside the inner radius. Never put the outer band back on `Scatter`.
+- **`Trails` are old logging tracks that fork rather than radiate**, drawn as render-only dirt by
+  `BuildTrails`. They all **give out somewhere in the trees and nothing is placed at their ends** —
+  they are something to navigate by, never a route to anything. A track that ended at a fragment
+  would be a marker, which is exactly what this level must not have.
+- **Tracks and the gate's ground are reserved before a single tree is placed.** `Blocked` rejects
+  anything within `TrailClear` of a track or 7 m of `GatePos`. Growing the forest first and carving
+  after leaves trunks standing in the path, because `Scatter` has already committed.
+- **Everything is scaled to this map and must be retuned together:** `MonsterSpawner.areaRadius`
+  **88** (which also sets each monster's `roamRadius`), `NightDepth` **22/85**,
+  `LootSpawner.shallowRadius`/`deepRadius` **22/90**, `Expedition` band **30–92 m**,
+  loot rings Yard 9–20, Field 20–45, Deep 45–95.
+
 ### Door pattern — follow it exactly
 
 A doorway is the wall's jamb/lintel pieces (produced by `WallRun`) plus a hinge.
@@ -76,47 +104,169 @@ journal fragments and a map that reveal where the next house is. Survival over c
 one authority object owns each piece of shared state, no per-player statics, no game logic living
 in UI. `Wallet.HasAuthority` is the pattern — a seam that becomes `IsServer` when Netcode lands.
 
-### Level 1 — bring Tom's case home
+### Level 1 — four key fragments, then the way into Level 2
 
-The whole objective, and deliberately nothing more: **find Tom's case at his camp in the deep woods
-and open it at the kitchen table.** No quest UI, markers, stages, timer or scripted events — the
-tension comes from the systems (fuel, depth, weight, noise). The loot/store loop runs alongside it
-untouched, and the level can be finished with every optional story element ignored.
+The progression, end to end. Each arrow is an object in the world, not a quest stage:
+
+**find 4 `KeyFragment`s in the woods → fit them into the `KeyMaker` on the kitchen table → it makes
+the `CompleteKey` → buy the `UVFlashlight` → find the UV footprints out in the forest → follow them
+to the `RevealCircle` → scatter `MagicPowder` on it → the `Level2Door` appears → unlock it with the
+key → it opens, level complete.**
+
+No markers, no objective list, no timer. The only readout in the whole chain is the key maker's
+`n/4`, because that is the one number the player genuinely cannot infer from looking at things.
 
 | Piece | Owner | Where |
 |---|---|---|
-| Objective state, spawning the case, completion | `Expedition` (authority, `Instance`, `HasAuthority`) | Systems |
-| The case | `TomsCase` (a `Carryable`, **not** a `Valuable`) | `Assets/Prefabs/Objective/TomsCase.prefab`, spawned at run time on `Props/TomsCamp/CasePoint` |
-| Where it is opened | `CaseTable` (`IInteractable`, **E**) | `House/Furniture/Kitchen/KitchenTable`, added by the environment builder |
+| Scattering the fragments, completion | `Expedition` (authority, `Instance`, `HasAuthority`) | Systems |
+| A piece of the key | `KeyFragment` (a `Carryable`, pack-storable) | `Prefabs/Objective/KeyFragment.prefab`, spawned at run time |
+| Turning four pieces into one key | `KeyMaker` (`IInteractable`, **E**) | `House/Furniture/Kitchen/KitchenTable/KeyMaker` |
+| The finished key | `CompleteKey` (a `Carryable`) | `Prefabs/Objective/CompleteKey.prefab`, made by the `KeyMaker` and **nowhere else** |
+| Seeing ultraviolet | `UVFlashlight : Flashlight` | `Prefabs/Store/UVFlashlight.prefab`, store stock |
+| Being invisible until UV hits it | `UVRevealed` (pure observer) | every footprint, and the circle |
+| Probing for hidden things | `MagicPowder` (a `Carryable`, **left mouse**) + `PowderPatch` | store stock |
+| The ending | `Level2Door` (`IInteractable`, **E**) | `Props/Level2Site/Level2Door` |
+| Swinging the whole trail onto a new bearing each run | `Level2Site` (authority) | `Props/Level2Site` |
 | The ending screen | `LevelCompleteHud` (pure observer) | Systems |
-| The one mandatory note | `Readable` on `House/Detail/Notice`, drawn by the player's `ReadableHud` | builder / Player |
+| The one mandatory note | `Readable` on `House/Detail/Notice` | builder / Player |
 
-- **The case is the Large load.** `Carryable.ApplyLargeLoad` is the one copy of the Large numbers,
-  shared with `ValuableSize.Large`: 3.1 walk (slower than chase 3.6), no sprint, no pack — so no
-  torch in hand while carrying it. Retune it with the television and `chaseSpeed`, never alone.
-- **Taking it is loud, once.** The first lift emits `liftNoiseRadius` (30 m) from where it lay — an
-  ordinary `Noise`, a lure, never a spawn. Estimated ~1.2 of the 5 monsters are in earshot at a
-  random moment (26% none, 33% two or more). Picking it up again after a drop is as quiet as anything.
-- Everything else it needs already existed: dying drops it where you fell, the sell counter ignores
-  it (not a `Valuable`), and the carrying line says `(too heavy to run)`.
-- `CaseTable` offers **E "Open Tom's case"** only while you hold it — the generator-refuel pattern —
-  then `ConsumeCarried`, `TomsCase.OpenAt` on its `CaseRest`, `Expedition.CompleteLevel`. There is no
-  scene change yet: `LevelCompleteHud` shows the map for `fullSeconds`, then shrinks to
-  `Hud.RowRight(2)`. The map is deliberately vague about "2" — Level 2 is not decided.
-- **Tom's camp** is built by `PrototypeEnvironmentBuilder.BuildTomsCamp` on the first clear spot near
-  `CampTarget` (−18, −38): currently (−18.4, −38.4), 41 m from the generator, a 43 m `PathComplete`
-  walk from the entrance (~14 s carrying the case). Its dressing is render-only and **unlit** — the
-  deep forest still has no lights.
-- **Environmental story, all optional:** the notice's sketch → the wreck's headlight → pale
-  `Env_Paint` bands on trunks every ~4 m (`PaintTrail`; faint by moonlight, plain by torch) → a
-  painted X on the tree by the camp. `TrampledRing` wears dirt strips at the generator's radius (read
-  from the component) — the safe-zone rule on the ground. Nina's drawing in the shed is a second,
-  optional `Readable`.
-- **`Readable` holds no state.** Which note is open is the reader's own `ReadableHud`, so two players
-  can read the same notice. It closes when you walk `closeDistance` away; reading never pauses the
-  game. A new note is a collider, a `Readable` and its text.
-- **Known risk:** nothing tells the player the kitchen table is where the case goes. Watch for it in
-  playtests before adding anything.
+#### The key maker
+
+- **It offers nothing unless a fragment is in your hands** — the generator-refuel and sell-counter
+  rule, so it is furniture until it matters.
+- **The count is visible three ways and stored once.** A fitted fragment is pinned into one of four
+  sockets and a lamp over it lights; the prompt reads `(3/4)`; `Hud.RowRight(4)` carries the line
+  while it is part-full. All three read `KeyMaker.Fitted` — there is no second counter anywhere.
+- `fragmentsNeeded` is **wired from `Expedition.fragmentsInLevel` by the builder**, never authored
+  twice, so changing how many the level hides cannot leave the device asking for a different number.
+- **The fragments are destroyed when the key is made**, not hidden. They have gone into the key and
+  nothing should be able to find them again.
+- **`CompleteKey` has exactly one source.** It is in no loot table, no store stock and nowhere in
+  the scene — `KeyMaker.MakeKey` is the only thing that instantiates it. Keep it that way.
+
+#### The UV trail
+
+- **`UVFlashlight` is a `Flashlight` subclass and adds one thing: a registry of lit beams.** Pickup,
+  carrying, the **X** key, going dark while stowed — all inherited, none restated.
+- **The cone is read from the beam `Light` itself** (its `range` and `spotAngle`), so what is
+  revealed is exactly what the player sees lit. Retuning the light retunes the reveal for free and
+  the two can never drift apart.
+- `UVRevealed` switches renderers and **nothing else** — no objective state, no idea what it is part
+  of. That is what lets the same component serve the footprints, the circle, and whatever is worth
+  hiding next. `AnyLit` is the static early-out so the no-flashlight case costs one check per mark.
+- `linger` (0.35 s) stops a mark flickering out the instant the player's aim drifts off it.
+- **The trail's bearing is rolled every run.** The builder lays it out along local **+z** from 40 m
+  to 90 m; `Level2Site` rotates the root about the house at `Start`, rejecting bearings that would
+  bury the door, then ground-snaps every mark. A fixed trail is learned once and walked straight to
+  — the exact failure this level was rebuilt to avoid.
+- **The marks are nudged clear of trunks, and the door's spot is checked properly.** The bearing is
+  rolled *after* the forest exists, so a footprint can come down inside a tree — and a buried mark on
+  a trail of eighteen is a gap in the only thread the player has. `SitOnGround` accepts a spot only
+  when the ray lands on `Ground` itself, and otherwise steps the mark round a small spiral of
+  `nudgeRadius`. Measured over 100 bearings: **6.3% of marks land on something, 100% of those are
+  rescued, none end up buried.**
+- **`DoorSpotClear` filters the site's own colliders explicitly** rather than trusting that
+  `Level2Door.Awake` has already switched them off. That ordering does hold (every `Awake` precedes
+  every `Start`), but a check that silently depends on execution order is a trap — and this one
+  would fail *closed*, rejecting every bearing in the level and falling back to the authored one
+  without anyone noticing. Measured: **a clear bearing is found on 100% of runs, worst case 5 of 40
+  attempts.**
+- **It starts 40 m out, not at the door.** You have to already be exploring with the flashlight on before
+  there is anything to find.
+
+#### The door
+
+- **Three states, never backwards:** hidden (renderers *and colliders* off, so there is not even an
+  invisible wall to walk into) → revealed by the powder → unlocked by the key, which swings it and
+  fires `Expedition.CompleteLevel`.
+- **The jar never runs out.** It is bought once and kept — a permanent tool, not a consumable.
+  There are no charges, no durability and no cooldown on *using* it. The powder's job is to be
+  asked the same question over and over while the player sweeps a hillside, and anything that made
+  each pour cost something would push them back to standing still and guessing.
+- **Pouring is a real gesture, not an instant effect.** Left mouse tips the jar over `pourTilt`
+  (**115°**) across `pourSeconds` (**0.42 s**) and rights it again — one float shaped into an
+  out-and-back sine, like `DamageFeedback`'s flash, so no coroutine is left running and a second
+  click can only be ignored rather than leaving two motions fighting over the transform.
+- **115° is past horizontal on purpose.** The jar's mouth is its local **+Y**, so at 78° the mouth
+  still points *forward* and the jar reads as being presented rather than poured; past 90° it
+  points down and away, over the ground being aimed at. Measured through the arc:
+  upright → (0, −0.42, 0.91) at the peak → upright.
+- **The dust lands at `pourDelay` (0.13 s), not on the click**, so it appears *because* the jar
+  tipped rather than a moment before it. The spot is pinned at the click, so it falls where the
+  player was looking even if they have turned away by the time the jar finishes.
+- The motion is applied **relative to the authored held pose** (`heldEuler`/`heldPosition`), never
+  absolutely — the carry socket is deliberately cocked and an absolute pose would fight it.
+- **Every route out of the hands cancels it** (`OnPickedUp`/`OnStowed`/`OnDropped`, plus a guard in
+  `Update`). A stowed object's `Update` does not run, so without those a jar put away mid-tip would
+  resume its pour when taken back out.
+- Ignoring a click while the jar is already tipping is the **motion finishing, not a limit on how
+  often the powder may be used**. There is no such limit.
+- **`RevealCircle` is found, not used — it is not an `IInteractable` at all.** There is no prompt
+  and no key on it, because a circle that announced itself would give the door away to anyone who
+  walked past without a UV flashlight. The pour does an `OverlapSphere` and asks whatever is in
+  reach whether it wants revealing, so the next hidden thing only has to offer itself the same way.
+- Its volume is a **trigger**: a solid box would be an invisible wall in the middle of the woods,
+  and the pour's overlap passes `QueryTriggerInteraction.Collide`.
+- `revealRadius` (**3.5 m**) is deliberately wider than the circle. Hunting a 3 m circle with a 3 m
+  probe would be miserable; the UV trail is what narrows the search, not the powder.
+- **Left mouse is routed, never read with `Input`.** `MagicPowder` declares it from `GetOptions`
+  while `IsHeld`, exactly as `Flashlight` declares **X**, so the one-router rule holds.
+- **It stands down while the store is open** (`Store.IsAnyOpen`). The store is the only place in the
+  game where the mouse means something other than the world, and without this every click on a Buy
+  button would also tip the jar out on the shop floor.
+- Pouring emits its own **6 m `Noise`** straight to the bus. Keys routed to a held item are silent
+  by rule, but that rule is for switches — tipping a jar out on the ground is a world action, the
+  same reasoning the store's purchase noise follows.
+- `PowderPatch` is **pure presentation**: the dust and one line of text ("The dust settles. Nothing
+  here." / "The dust catches on something that is not there."). Patches are left lying where they
+  fall on purpose — a player sweeping a hillside needs to see where they have already looked.
+- **The whole site carries `NavMeshModifier.ignoreFromBuild`.** At bake time it is still on its
+  authored bearing with the door's colliders enabled (`Awake` has not run in edit mode), so without
+  this the bake would carve a hole exactly where the door *isn't* once the level starts.
+- The door offers the unlock **only while the key is in your hands**, the sell-counter rule. It
+  deliberately shows no "it's locked" prompt to an empty-handed player: by the time the door can be
+  found at all, the key has already been made.
+
+#### What was removed, and why it must not come back
+
+The level used to be "find Tom's case at his camp and open it at the kitchen table", then "assemble
+Tom's torn map", then briefly "fit the fragments into a gate". All are gone, along with `TomsCase`,
+`CaseTable`, `MapPiece`, `MapHud`, `Cache`, `Gate`, the nine POI buildings, Tom's camp and the paint
+trail. The reason the first version failed in playtest is worth keeping: *the objective was in one
+fixed place, so the player already knew the answer and had no reason to explore.* Anything that
+reintroduces a fixed objective location — an authored hiding place, a landmark that always holds a
+piece, a track that leads to one — brings that failure straight back.
+
+What deliberately stayed: the forest and its tracks, the house, the generator, the shed, the well,
+the wreck, the notice by the door and Nina's drawing in the shed.
+
+- **Nina's drawing in the shed is where the two tools are explained**, and it is the only place.
+  It says it as a child describing a game she made up — a purple lamp with glowing footprints
+  under it ("THE PURPLE LIGHT SHOWS WHERE THINGS WENT") and a stick girl tipping a jar over a door
+  drawn in heavy crayon ("THE DUST SHOWS WHAT IS STILL THERE"). **UV flashlight → invisible
+  traces; magic powder → invisible objects.** Never phrase it as a tutorial: the player should
+  work out that she is describing the two store items, not be told. Optional — nothing gates on it.
+
+- **The tracks lead nowhere on purpose.** They are something to navigate by, never a route to
+  anything; nothing is placed at their ends. A track that ended at a fragment would be a marker.
+
+#### Where the fragments can hide
+
+Three rules shape the draw, and each one exists to keep searching honest:
+
+- **Outside `minDistanceFromBase` (30 m from the generator)** — so no piece is ever collectable from
+  inside the protection, and none can land in the house. This is the rule the user asked for
+  directly: never at the base, always somewhere else.
+- **Inside `maxDistanceFromBase` (92 m)** — so nothing ends up jammed against the boundary wall.
+- **`minSeparation` (35 m) apart** — so the four are spread around the compass and finding one never
+  means you have nearly found the next.
+- **On real, walkable ground.** `Expedition.Ground` raycasts down, rejects faces steeper than
+  `maxSurfaceSlope`, then overlap-boxes above the hit. **The box is what catches a point inside a
+  trunk** — a downward ray that *starts* inside a collider passes straight through it and finds the
+  floor beneath, so the ray alone would happily bury a fragment in a tree. Same reasoning as
+  `LootSpawner.TryResolveSurface`.
+- A fragment is pack-storable, so it costs one of the four slots — "carry this back or carry the
+  radio back" is a decision made in the field, not in a menu.
 
 ### TimeOfDay — Level 1 is always night
 
@@ -160,7 +310,7 @@ aim is always authoritative. Otherwise everything within `range` is gathered wit
 (lowest wins), sorted, and the first candidate that is **both visible and willing** is taken.
 
 - The aim point is the spot on the collider nearest the view ray, so tolerance scales with size:
-  a door is forgiving across its whole face, a dropped torch still gets a real area.
+  a door is forgiving across its whole face, a dropped flashlight still gets a real area.
 - A candidate that returns no options must not block the ones behind it — that is why the search
   walks a sorted list instead of committing to the single best score. An empty-handed player at the
   sell counter still gets the door prompt.
@@ -169,30 +319,34 @@ aim is always authoritative. Otherwise everything within `range` is gathered wit
 - `aimTolerance` under 90° is what excludes things beside and behind the player. Don't raise it past
   that; there is a `[Range(1, 85)]` on the field for this reason.
 - Measured with the defaults (range 3.5, tolerance 32°): doors ~±50° of yaw, the sell counter ~±56°,
-  a torch on the floor a 42°-tall by 114°-wide window. Near a door, the torch needs a deliberate look
+  a flashlight on the floor a 42°-tall by 114°-wide window. Near a door, the flashlight needs a deliberate look
   down — the door legitimately wins at head height.
 
 **Key map (the interactable declares its own key, so nothing can silently steal one):**
 
 | Key | Action | Declared by |
 |---|---|---|
-| **E** | open / close doors, sell at the counter, open / close the store, revive a body, read a note, **and** open Tom's case | `DoorInteraction.useKey`, `SellStation.sellKey`, `Store.browseKey`, `PlayerBody.reviveKey`, `Readable.readKey`, `CaseTable.openKey` |
+| **E** | open / close doors, sell at the counter, open / close the store, revive a body, read a note, fit a key fragment into the key maker, **and** unlock the Level 2 door | `DoorInteraction.useKey`, `SellStation.sellKey`, `Store.browseKey`, `PlayerBody.reviveKey`, `Readable.readKey`, `KeyMaker.fitKey`, `Level2Door.unlockKey` |
 | **F** | pick up an item, and pour fuel in | `Carryable.pickUpKey`, `Generator.refuelKey` |
 | **Q** | drop what you are holding | `PlayerInteractor.dropKey` |
+| **Left mouse** | pour a little magic powder where you are looking | `MagicPowder.pourKey` — routed to the *held* item, like the flashlight's X |
+| **R** | tip a dead player's belongings out of their body | `PlayerBody.searchKey` |
 | **T** | start / stop the generator | `Generator.powerKey` |
-| **X** | switch the torch on / off | `Flashlight.toggleKey` |
+| **X** | switch the flashlight on / off, UV flashlight included | `Flashlight.toggleKey` (inherited by `UVFlashlight`) |
 | **1–4** | select a pack slot | `PlayerInventory.slotKeys` — **not** routed; see below |
+| **C** | crouch toggle | `PlayerMovement.crouchKey` — **not** routed, like 1–4 |
 
 `PlayerInventory` reads 1–4 itself, and that is not a violation of the one-router rule: a slot is
 not something you aim at, so it is a player system like `PlayerMovement`, not an interactable. They
 are in this table so nothing else ever claims them — an interactable that declared `Alpha1` would
-fire alongside a slot swap.
+fire alongside a slot swap. `PlayerMovement` reads **C** (and Shift / Space) on the same footing.
 
 - `GetOptions` fills a list, so one object can offer several actions at once — the generator offers
   refuel (F) and start (T) together, so you never have to put the can down to switch it on.
 - **Every interaction makes a noise**, emitted once by the router (`interactNoiseRadius`, 12m) so a
   new interactable is audible to the blind monster without doing anything. Keys routed to a *held*
-  item are silent on purpose.
+  item are silent on purpose. It goes out through the player's `NoiseEmitter`, so a **crouched**
+  player handles things silently too (see *Crouching* below).
 - Add nothing to the list to refuse interaction entirely.
 - Ask what the player is holding with `interactor.GetCarried<T>()`; that is how the generator knows
   whether to offer refuel at all.
@@ -215,14 +369,48 @@ fire alongside a slot swap.
   another player, so there is no per-player ownership to replicate — this becomes a server-side call
   and the item's transform is all a client needs.
 - **A held item gets keys too.** Each frame the router also asks the carried item for its options and
-  routes those — you switch a torch on without looking at it. Declare them from `GetOptions` while
+  routes those — you switch a flashlight on without looking at it. Declare them from `GetOptions` while
   `IsHeld`, exactly as `Flashlight` does; never add an `Input` call. If the held item and the aimed
   target share a key the **target wins**, so one press can never fire two actions.
 - `CarrySocket` is deliberately cocked (0, 340, 8) so a held prop sits at a jaunty angle. Anything
-  directional — a torch beam, later a camera — must cancel that out via its own `heldEuler`, or it
+  directional — a flashlight beam, later a camera — must cancel that out via its own `heldEuler`, or it
   will point 20° off the crosshair.
 - Anything interactable needs a collider, and colliders must be enabled to be looked at — doors are
   deliberately unhittable mid-swing for this reason.
+
+### Crouching — the quiet walk, not the silent one
+
+`PlayerMovement` owns it; **C** toggles (not hold). Tuning on the Player: `crouchSpeed` 2.0,
+`crouchHeight` 1.2 (the eye drops 0.8 with the feet fixed), `eyeMoveSpeed` 5.
+
+- **A crouched body is very quiet, never inaudible.** It used to emit nothing at all, which made
+  crouching an off switch for the whole monster rather than a stealth option; that was the single
+  biggest balance problem in Level 1. A crouched step now carries `NoiseEmitter.crouchNoiseRadius`
+  (**2.5 m**) every `crouchStepInterval` (**0.85 s**) — something has to be nearly on top of you to
+  hear it, and creeping past a monster is a real gamble rather than a free pass.
+- **Standing still while crouched is still perfectly silent**, and that is the player's true zero.
+  It is free: a standing body is under `walkThreshold` (0.6), so nothing is emitted. "Stop and hold"
+  is a better verb than "hold C", so don't replace this with a special case.
+- **One-off noises are muffled, not dropped:** `NoiseEmitter.Emit` scales the radius by
+  `crouchNoiseScale` (**0.31**), so the interactor's 12 m becomes under 4. Working a door open beside
+  something still costs you a little. The noise still exists, so `Noise.OnNoiseEmitted` and the debug
+  overlays see it — never go back to returning early, which hid crouched actions from the overlays too.
+- `Emit` is still the one gate for everything the body does, and the interactor emits through it, so
+  nothing can bypass the muffle. `IsMuffled` (was `IsSilenced`) reads `PlayerMovement.IsCrouching`.
+  Footsteps go straight to `Noise.Emit` because the crouched step radius is *already* the crouched
+  one — passing it through `Emit` would scale it twice.
+- Noises made by **world objects** are untouched by crouching: the
+  store's 8 m purchase, a door a monster forces. Crouching muffles you, not what you disturb.
+- The monster has no vision to keep: crouching changes nothing it does except what it hears, and it
+  still hurts a crouched player by touch.
+- Crouched: no sprint, no jump. Speed composes: whatever is carried slows the crouch by the same
+  fraction it slows walking, so the television crouched is 2.8 × 2.0/3.5 = 1.6.
+- Standing needs headroom (`HasHeadroom`, an overlap capsule above the crouched head). Pressing C
+  under something low queues the stand and it happens once there is room; `Hud.Row(0)` says
+  `Crouching - no room to stand` meanwhile.
+- The capsule and the avatar's `CapsuleCollider` shrink with the feet fixed. The eye is lowered by
+  the *difference* each frame and `CameraShake` offsets relatively, so the two compose.
+- Crouch survives the store (which disables movement) and death; it is the player's toggle.
 
 ### Inventory — four slots on your back, one thing in your hands
 
@@ -260,15 +448,19 @@ selection **and nothing else — the hands still belong to `PlayerInteractor`.**
   `CanStowCarried` is false, `CanPickUp` is false, and you cannot pick anything else up until you
   put it down. A number key with one in your hands does nothing at all: it is not swapped away and
   it is *not* dropped for you. `ValuableSize.Large` clears it through the shared
-  `Carryable.ApplyLargeLoad`, so the television (and Tom's case) are automatically hands-only —
+  `Carryable.ApplyLargeLoad`, so the television is automatically hands-only —
   retune that with the Large movement numbers, not separately. `Custom` leaves it as authored.
 - `PlayerInteractor.PickUpRefusalReason` distinguishes the two refusals ("hands and pack full" vs
   "put the old CRT television down first") because they need different actions from the player.
   `Carryable.PickUpRefusal` puts it on the prompt for every item for free.
-- A stowed torch goes dark and lights again when taken out, because stowing deactivates the object.
+- A stowed flashlight goes dark and lights again when taken out, because stowing deactivates the object.
   Override `OnStowed`/`OnUnstowed` for an item that should keep running in the pack.
-- Dying still drops only what is **in the hands**; slots survive a death. Change that in
-  `PlayerInteractor.DropCarriedOnDeath`, not here.
+- **Dying empties the pack as well as the hands, onto the body.** `PlayerInteractor.ReleaseBelongings`
+  is the one route: it takes the held item (through `ConsumeCarried`, so the load clears) and then
+  `PlayerInventory.ReleaseAll`, and hands the lot to the `PlayerBody`. Nothing is dropped, cloned or
+  destroyed on that path — the slots' items are already stowed, so they simply change owner. With no
+  `Revival` in the level, `DropCarriedOnDeath` still drops the hand item on the floor and slots
+  survive, which is the behaviour that came first.
 - `InventoryHud` on the Player only *reads* the pack — no slot, key or swap logic lives in the UI,
   the same rule `MoneyHud` follows. Being immediate-mode it is redrawn every frame, so it cannot go
   stale. `Hud.BottomBarHeight` is the one number reserving the bottom strip; the interactor's
@@ -304,17 +496,71 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
 |---|---|---|
 | `Patrol` | Roams the map at `patrolSpeed`, destinations chosen by `MonsterPatrol` | any noise is heard |
 | `Alerted` | Walks to the (blurred) noise position at `alertSpeed` | arrives → `Investigate`; louder/repeated noise → `Chase` |
-| `Investigate` | Stands and sweeps its look around for `investigateDuration` | timer out → `Patrol` (agitation reset); new noise → `Alerted`/`Chase` |
-| `Chase` | Same as `Alerted` but `chaseSpeed`, always re-targeting the **newest** noise | `agitation` decays below `chaseThreshold` → `Alerted` |
+| `Investigate` | Stands still at one spot and sweeps its look around for `investigateDuration` (3 s) | timer out → `Search` while `searchesLeft`, else give up; new noise → `Alerted`/`Chase` |
+| `Search` | Walks to one place near the noise at `alertSpeed`, then listens there | arrives (or the leg is lost) → `Investigate` |
+| `Chase` | Same as `Alerted` but `chaseSpeed`, re-targeting the newest noise at most every `retargetCooldown` | `agitation` decays below `chaseThreshold` → `Alerted` |
+| `Prowl` | Walks to a spot inside the house at `patrolSpeed` and has a look round for `prowlLinger` | arrived and lingered, the leg is lost, or the generator starts → `Patrol`; any noise → `Alerted`/`Chase` |
+| `Leaving` | Standing in a running generator's light: walks itself out to the boundary at `alertSpeed` | it is out of the light → back to whatever it was doing |
 
-- **`agitation`** is the aggression dial: each heard noise adds `agitationPerSound * (0.5 + clarity)`,
-  it decays at `agitationDecayPerSecond`, and crossing `chaseThreshold` is what turns walking into
-  running. Sounds close together stack; silence calms it down.
+- **Arriving at a noise starts a search, not a stare.** It picks `minSearchPoints`–`maxSearchPoints`
+  (**2–4**) walkable points within `searchRadius` (**10 m**) of where it thought the sound came from
+  and works through them, listening at each. So the whole sweep is ~20–25 s of it moving around the
+  area, and the player's question is "where is it going to look next", not "has the 6 s timer run out".
+- **A failed search costs the player the area, not six seconds.** `GiveUpSearch` calms the agitation
+  but calls `MonsterPatrol.Bias(searchCentre, searchInterestRadius 18, searchInterestTime 38)`, which
+  holds the round near the place that went quiet and **widens the leash back out to the whole map over
+  those 38 s**. Nothing has to remember to switch it off, and a second noise simply takes over.
+- **Every 10–300 s each monster goes and tries the house, whether or not it has heard
+  anything.** `minProwlInterval`/`maxProwlInterval` are rolled per monster and re-rolled after
+  every attempt, so the wave never arrives together and no two nights are the same. This is
+  **not detection** — it still has no idea whether anyone is in there. It is what makes keeping
+  the generator lit worth doing *before* something is already after you, rather than only a way
+  out of a chase.
+- **The prowl is refused outright while the generator runs**, and nothing in `Monster` says so:
+  it asks `MonsterPatrol.ChooseNear` for a walkable spot within `prowlRadius` (5 m) of the house
+  centre, and `ChooseNear` already refuses anywhere inside the light. A refusal simply re-rolls
+  the timer. If the light comes on mid-walk, the prowl is abandoned.
+- A prowling monster **forces doors**, like a hunting or searching one — a shut front door is the
+  whole of "trying to get in". It walks at `patrolSpeed`, so the warning is the footsteps and the
+  door, never a lunge. The house is found from `Monster.house`, else the `House` root, else the
+  origin.
+- **A light that comes on around a monster is walked out of, never teleported out of.**
+  `TickLeaving` takes over the frame — it heads for `BoundaryPoint` on the NavMesh, forcing a door
+  on the way if it was shut in, and steers straight at the nearest edge if there is no route.
+  Noises heard on the way out do not interrupt it; they decide the state it leaves in.
+  `leaveGraceSeconds` (**8 s**) is the backstop that still places it on the boundary if it truly
+  cannot get out, so "never inside the light" holds — but it is the backstop, not the behaviour.
+  `Monster.Move` no longer corrects position at all.
+- **`agitation` is the aggression dial:** each heard noise adds
+  `agitationPerSound * NoiseWeight(radius) * (0.5 + clarity)`, it decays at `agitationDecayPerSecond`,
+  and crossing `chaseThreshold` (**4**) turns walking into running. `maxAgitation` (**6**) is headroom
+  so a chase survives a few seconds of silence instead of dropping to a walk the instant you stop.
+- **`NoiseWeight` is what makes the three gaits three different events**, rather than one event at
+  three ranges: `(radius / referenceNoiseRadius) ^ noiseWeightExponent`, capped at `maxNoiseWeight`
+  (8 m / **1.5** / 3). Measured at middling clarity, with decay accounted for:
+
+  | noise | radius | weight | outcome |
+  |---|---|---|---|
+  | crouched step | 2.5 | 0.18 | heard only within 2.5 m, and **decays faster than it accrues — creeping can never reach a chase**, only bring it over to look |
+  | crouched interaction | 3.7 | 0.31 | a small, local risk |
+  | walking step | 8 | 1.0 | **investigated**: ~5 s of walking inside its earshot to tip into a chase, longer at the edge |
+  | interaction | 12 | 1.84 | one press is most of the way to a chase |
+  | landing a jump | 14 | 2.3 | nearly a chase on its own |
+  | sprinting step | 20 | 3 (capped) | **chase in ~2 steps**, even heard at the far edge |
+
+- **`retargetCooldown` (0.4 s) makes it commit.** While already pursuing it will not swing onto a
+  newer noise more often than that — louder noises still stack agitation, it just stops twitching at
+  every footfall, which reads as smarter for less code.
+- **A searching monster forces doors too**, not only a pursuing one: the NavMesh is baked as though
+  the doors were open, so a search leg through a shut one would otherwise wedge against it. Search
+  legs carry the same lost-leg guard the patrol legs do (`follower.Blocked`, or longer than
+  `patrolSecondsPerMetre` allows).
 - Monsters must **never** decide safety by measuring distance themselves; they call
   `Generator.GetProtector` / `IsPointProtected`. `KeepOutOfSafeZone` runs on every heard position
   *and* every destination, so a noise made inside the light draws it to the boundary and no further.
-  `Monster.Move` also re-checks after every move and pushes back out, so no collision slide or
-  steering bug can ever put one inside the light.
+  Anything that still ends a frame inside the light — the generator started around it, a collision
+  slide — is picked up by `TickLeaving` the next frame and **walks** out (see above). `Monster.Move`
+  deliberately corrects nothing itself.
 - **Moving is still the monster's own job; only the route is the NavMesh's.** `NavPathFollower`
   (a plain class, one per monster) turns "go there" into "steer at this corner", and `Monster.Move`
   still drives the `CharacterController` — so gravity, the safe-zone push-out and attack-by-touch
@@ -322,8 +568,29 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
   transform and fight all three. Used by pursuit as well as patrol, so chasing rounds corners too.
   `NavPathFollower.Blocked` is the "you cannot get there from here" signal — it is true only when
   both ends sampled onto the mesh and the route still came back incomplete.
-- Balance now: chase 3.6 vs player walk 5 / sprint 9 — always outrunnable, so death is a mistake,
-  not a dice roll. 25 damage every 1.2s = 4 hits, ~4.8s of standing still.
+- The wave is deliberately still **4** monsters. Better search behaviour was tried on its own first,
+  so that the count is a separate decision from the behaviour and neither hides the other.
+- Balance now: chase **4.0** vs player walk **3.5** / sprint **6.0** on stamina (see *Sprint stamina*).
+  Walking loses 0.5 m/s to a chasing monster; a full sprint buys ~10 m, and sprinting in bursts can
+  never average faster than it. Escape is sound — get past its hearing, then walk or crouch — not
+  legs. 25 damage every 1.2s = 4 hits, ~4.8s of standing still.
+
+### Sprint stamina
+
+`PlayerMovement` owns it (per player, not static). Tuning on the Player: `maxStamina` 100,
+`sprintStaminaDrain` 20/s (**5 s** of sprint), `staminaRegenRate` 5/s after `staminaRegenDelay`
+1.5 s (**~21.5 s** empty to full), `exhaustedResumeStamina` 25.
+
+- **The invariant:** `staminaRegenRate ≤ drain × (chaseSpeed − speed) / (sprintSpeed − chaseSpeed)`.
+  Long-run burst-sprint speed is (sprint + walk·r)/(1 + r) with r = drain/regen; at the defaults that
+  is exactly 4.0 before the delay, and under it with the delay. Retune walk, sprint, chase and regen
+  together or the player can outrun the monster forever.
+- Drains only while actually sprinting (key held, moving, allowed). Regen waits `staminaRegenDelay`
+  after the **last sprinting frame**, so tapping shift restarts the wait and earns nothing back.
+- Running dry sets `IsExhausted`: no sprint until stamina is back to `exhaustedResumeStamina`, so a
+  held key cannot stutter on scraps. Walking is unaffected.
+- A heavy load or a crouch swallows the key before stamina is consulted, so neither spends any.
+- `Hud.Row(1)` shows the percentage while it is below full, and `out of breath` while exhausted.
 - `showDebug` (on by default) draws the hearing radius, the destination in the state's colour, the
   last heard position and a state/agitation label in the Scene view. `MonsterDebugHud` on `Systems`
   is the in-game readout. Both are pure observers — turning either off changes no behaviour.
@@ -334,14 +601,20 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
   the radius — so "they can open doors" is really "once the light dies". `DoorInteraction.canBeForced`
   can be cleared for a door that should hold.
 - **Known limit:** sound is not occluded. A noise through a wall carries as far as one in the open.
-- **Known limit:** only a *hunting* monster forces doors, so a patrolling one that routes through a
-  shut doorway walks into it, times out and picks somewhere else. Correct, but it costs a leg.
+- **Known limit:** only a *hunting or searching* monster forces doors, so a patrolling one that routes
+  through a shut doorway walks into it, times out and picks somewhere else. Correct, but it costs a leg.
 
 ### MonsterPatrol — where it goes when nothing has its attention
 
 `Assets/Scripts/MonsterPatrol.cs` is a component on the monster and **knows nothing about
 detection** — not hearing, not sight, not agitation, not the player. Hand it a position, get back a
-walkable point. That ignorance is the point: a sighted monster can drop the same component on and
+walkable point. **`Bias(centre, radius, seconds)` is the only thing detection may say to it**, and it
+is deliberately vague — "keep your round near here for a while", with no mention of why or of a
+player — so the ignorance survives. `ChooseNear(centre, radius, from, out point)` is the other
+addition: a pure query for one walkable, reachable point near somewhere, used for search steps and
+for picking the spot a prowl heads for. It
+does not touch the patrol's own leg, so a monster can search and still have a round to go back to.
+That ignorance is the point: a sighted monster can drop the same component on and
 roam identically without either script sharing a line of the other's detection code. Detection
 always wins; `Monster` simply stops asking while it is alerted, investigating or chasing.
 
@@ -355,7 +628,13 @@ always wins; `Monster` simply stops asking while it is alerted, investigating or
   sets off somewhere it cannot reach. Each of `maxAttempts` relaxes the distance and the spread a
   little, so a monster shut in a small room still finds somewhere legal instead of failing perfectly.
 - It also refuses anything inside `Generator.IsPointProtected`, and `Monster` re-checks the current
-  destination every frame in case the generator started mid-leg.
+  destination every frame in case the generator started mid-leg. `ChooseNear` refuses the light too,
+  so a search never works its way into the safe zone.
+- **A bias is a fading preference, not a cage.** `AreaCentre` / `AreaRadius` lerp from the leash back
+  to `areaCenter` / `areaRadius` as the timer runs down, and `MinTravel` follows the radius down so a
+  leg still fits inside a small leash. Read those three properties, never the raw fields, or a biased
+  monster will wander straight out of the area it is supposed to be haunting — anchor candidates are
+  clamped for the same reason.
 - **A leg is abandoned three ways**, all in `Monster.PatrolLegLost`: the follower reports `Blocked`,
   actual `controller.velocity` stays under 30% of `patrolSpeed` for `patrolStuckTime`, or the leg
   outlasts `patrolSecondsPerMetre` × its length. Any of them picks somewhere else — nothing leans
@@ -384,7 +663,7 @@ because the door openings are only 1.2 wide.
   rebuilt forest does not leave monsters routing around trees that are gone. `House` is *not* in the
   `Keep` set, so the doors' modifiers are re-added by `PrototypeEnvironmentBuilder.Door`.
 - Anything else that changes level collision needs a re-bake. Verify with coverage and a
-  `CalculatePath` probe (the whole 110×110 ground samples, and every house room is `PathComplete`
+  `CalculatePath` probe (the whole 200×200 ground samples, and every house room is `PathComplete`
   from outside) rather than by eye.
 
 ### Sound — how anything gets noticed
@@ -395,14 +674,18 @@ source, time), an `INoiseListener` interface, and the static `Noise` bus.
 - **Making a sound is always one line:** `Noise.Emit(position, radius, gameObject)`. `radius` *is*
   the loudness — how far it carries in metres. Nothing polls; listeners register in `OnEnable`.
 - A listener hears it when `distance <= radius * hearingSensitivity` **and** `distance <=
-  hearingRadius`. The position it is handed is blurred by `positionError * (1 - clarity)`, so a
-  faint noise is a direction and a close one is a fix. A monster ignores its own `source`.
+  hearingRadius`. The position it is handed is blurred by `positionError * (1 - clarity)` (**5 m** at
+  the very edge of a sound's carry), so a faint noise is a direction and a close one is a fix. A
+  monster ignores its own `source`. **The radius is also how hard it reacts**, not only how far it
+  carries — see `Monster.NoiseWeight` — so a new noise gets a sensible reaction for free, and "make
+  it scarier" is one number rather than a new field.
 - **Who emits today:** `NoiseEmitter` on the Player (footsteps from `CharacterController.velocity`,
-  walk 8m / sprint 20m / landing 14m — standing still emits nothing at all), `PlayerInteractor`
-  (12m, once for *every* interaction, so a new interactable is audible the day it is written), and
+  walk 8m / sprint 20m / **crouch 2.5m** / landing 14m — standing still emits nothing at all, in any
+  posture), `PlayerInteractor` (12m, once for *every* interaction, so a new interactable is
+  audible the day it is written — sent through the `NoiseEmitter`, so crouching muffles it to 3.7), and
   `DoorInteraction.SetOpen` (14m, the code path a monster forcing a door uses; the player's own
   door noise comes from the interactor, so opening one by hand never sounds twice).
-- Keys routed to a **held** item are deliberately silent — flicking the torch on must not give you
+- Keys routed to a **held** item are deliberately silent — flicking the flashlight on must not give you
   away, and the flashlight has no effect on a blind monster in any other way either.
 - `Noise.OnNoiseEmitted` fires for every noise whether heard or not. Debug overlays only.
 
@@ -423,7 +706,9 @@ exactly one health system — `PlayerVitals` — and one readout, `Hud.Row(3)`.
   axis**. Roll cannot change `forward`, so the interaction ray, the flashlight beam and player
   movement are all untouched — never make it yaw or pitch instead. MouseLook rewrites
   `localRotation` every `Update`, so the roll is applied in `LateUpdate` and last frame's roll is
-  removed first; it can never accumulate, even with MouseLook off.
+  removed first; it can never accumulate, even with MouseLook off. The positional sway is relative
+  the same way (last offset off, new one on), because crouching also moves the camera's local
+  position — never go back to writing an absolute rest position.
 - `Shake()` is public and generic — a future fall, explosion or slammed door should call it
   rather than grow a second copy of the maths.
 - **The hit sound is deliberately unassigned.** `hitSound` is an empty `AudioClip` slot on the
@@ -445,19 +730,19 @@ home and uses **Adrenaline** on it. The pieces are deliberately separate, and ea
 | Revival item | `Adrenaline` (a `Carryable`, `IStorePriced`) | `Assets/Prefabs/Store/Adrenaline.prefab` |
 | Revive rules, the revive itself, bodies, price curve | `Revival` (authority, `RevivePricing`) | Systems |
 | Revives used this run, who is alive, all-dead | `RunState` (authority) | Systems |
-| "The safe house" | `ReviveZone` (a box, not a collider) | `House`, generated by the environment builder |
+| Whether a revive is *safe* to do | `Generator` (`IsPointProtected`) — not `Revival` | Generator |
 | What singleplayer does when everyone is dead | `SingleplayerDeathFallback` | Systems — **delete when co-op lands** |
 
 - **`PlayerVitals` knows none of the others.** It fires `OnDied` / `OnRevived`, plus the static
   `AnyDied` / `AnyRevived` for run-level listeners, and keeps a static `All` registry of players (a
   scene registry like `Generator`'s, not per-player state). Nothing else writes health.
 - **The body is its own object, not the player's.** So the player object is free to become a
-  spectator later, and the body is an ordinary hands-only `Carryable` (television weights: 0.62 walk,
-  no sprint, no pack). Carrying a teammate home is the same pick-up/put-down as anything else; a
+  spectator later, and the body is an ordinary hands-only `Carryable` (television weights:
+  `heavyLoad`, so `heavyWalkSpeed`, no sprint, no jump, no pack). Carrying a teammate home is the same pick-up/put-down as anything else; a
   future body teleporter only has to move an un-held body's transform — `Revival` never asks how it got there.
 - **`Revival.ReviveRefusal` is the single definition of "allowed"**, read by both the prompt and
-  `TryRevive`: body on the ground, inside a `ReviveZone`, rescuer holding `Adrenaline`, rescuer alive.
-  The body's pickup prompt always says which one is missing.
+  `TryRevive`: body on the ground, nobody already reviving it, rescuer holding `Adrenaline`, rescuer
+  alive. **Location is deliberately not one of them.** The body's pickup prompt says which is missing.
 - **The counter is global for the run and lives on `RunState`.** It resets in `Awake`, so every level
   load is a new run; `BeginRun()` exists for a new run without a reload. Only `Revival.TryRevive`
   calls `RecordRevive`, and only after a successful revive.
@@ -473,7 +758,51 @@ home and uses **Adrenaline** on it. The pieces are deliberately separate, and ea
   act as their own rescuer. The body stays, so fetch → buy → revive is fully playable. In co-op this
   component is removed and `OnAllPlayersDead` becomes Game Over.
 - One body per player: a new death replaces that player's old body (only reachable in singleplayer).
-- What is in the hands still drops where you fell; **pack slots survive a death**, as before.
+- **The body carries what its owner did — hands and all four slots.** `Revival.LeaveBody` calls
+  `PlayerBody.TakeBelongings`, which parents each item under the body and `OnStowed`s it: the same
+  deactivate a pack slot does, so it is the same GameObject with the same script, value and state,
+  and it travels with the body when someone shoulders it. This is why `PlayerVitals.Die` fires
+  `AnyDied` **before** `OnDied` — the body must exist before the interactor's own ground drop runs.
+- **R searches a body on the ground** (`PlayerBody.searchKey`), tipping everything out in a ring at
+  its feet through `Revival.GroundUnder` — the same footing rule the body itself was placed with.
+  From there each piece is an ordinary world pickup, so nothing needed a second route into a
+  player's hands. A revive spills whatever is left the same way: you come round empty-handed.
+- **Nothing about the body's own weight changed:** it was already `heavyLoad`, no sprint, no jump,
+  `canBeStoredInInventory` off. So "you cannot carry a body and the television" and "no flashlight in
+  hand while carrying a friend" both fall out of the existing Large rules rather than a new check.
+
+#### One revive, everywhere — the generator is the only thing that changes
+
+**There is no such thing as a home revive and a field revive.** `Revival.TryRevive` does not ask
+where the body is lying, and there must never be a branch that does: same `reviveSeconds` (**5.5 s**),
+same `reviveNoiseRadius` (**25 m**) every `reviveNoiseInterval` (1.5 s), same committed dose, in the
+kitchen and forty metres into the woods alike. A faster or quieter revive at home would make the
+generator decorative — the safety *is* the reward for hauling a teammate back.
+
+- **What the place decides is only whether that noise can reach you.** Inside a running generator's
+  radius the monsters it pulls cannot get in: `Monster.KeepOutOfSafeZone` already runs on every heard
+  position, so a revive in the light draws them to the boundary and no further. **Let the fuel run
+  out and the house is just another place to kneel down in** — which is the whole point of the
+  pressure. Nothing in `Revival` implements that; it falls out of `Generator` as it already stood.
+- `Revival.IsProtectedSpot` exists **for the prompt only** (`Generator.IsPointProtected`). It changes
+  no timing, no noise and no rule — if it ever gates behaviour, the design above has been broken.
+- **Every revive costs one Adrenaline**, at home or out. `RevivePricing` is untouched and money stays
+  the revive sink; the decision is *where to spend the 5.5 s*, never whether to pay.
+- **The dose is spent the moment the needle goes in**, before the timer starts. That is what makes
+  walking away a loss rather than a free look at a progress bar — and it is why the prompt says so.
+- An attempt fails if the rescuer strays past `reviveStayWithin` (3 m), dies, or presses **E** again
+  to call it off. `Revival.Update` holds all four failure paths in one place.
+- The 25 m noise goes **straight to `Noise.Emit`, not through the rescuer's `NoiseEmitter`** — it is
+  the patient and the needle, not the rescuer's body, so crouching over someone does not quieten it.
+  At that radius it is `maxNoiseWeight`-capped, and repeating it means a monster in earshot commits
+  to a chase rather than losing interest halfway.
+- While an attempt runs the body offers **only** cancel: it cannot be shouldered or searched
+  mid-injection, so there is no way to walk off with the patient still on the needle.
+- `Hud.RowRight(3)` is the progress line, drawn by `Revival` as a pure observer. In co-op it moves
+  to the rescuer's own HUD; today there is at most one attempt.
+- **`ReviveZone` is gone** — script, meta and the builder call that added one to `House`. It became
+  dead the moment location stopped gating revives. Don't reintroduce an "indoors" volume: the
+  question a revive cares about is *lit*, and `Generator.IsPointProtected` already answers it.
 
 ### Money and selling
 
@@ -499,14 +828,18 @@ only for client mirroring and editor preview.
 Price is only half a loot item; the other half is what carrying it costs you.
 
 - `CarryLoad` (declared in `Carryable.cs`) is the whole vocabulary: a walk multiplier, a sprint
-  multiplier and `allowSprint`. Every `Carryable` has one (`Load`), so a fuel can or a future crate
-  can be heavy without touching `Valuable`. Default is `CarryLoad.None` — no penalty.
+  multiplier, `allowSprint` and `heavy`. Every `Carryable` has one (`Load`), so a fuel can or a future
+  crate can be heavy without touching `Valuable`. Default is `CarryLoad.None` — no penalty.
+- **`heavy` (`Carryable.heavyLoad`) ignores the walk multiplier** and walks at the carrier's
+  `PlayerMovement.heavyWalkSpeed` (2.8, Inspector on the Player), with no sprint and no jump. So every
+  heavy thing — television, a body — is retuned in that one field.
 - **`PlayerMovement` is pushed the load, it never reads the item.** `SetCarryLoad` / `ClearCarryLoad`
   are the only seam; `PlayerInteractor.ApplyCarryLoad` is the only caller, and *every* route in and
   out of the hands passes through it (`Carry`, `DropCarriedAt`, `ConsumeCarried`), so a penalty can
   never outlive the item that caused it. There is still exactly one movement script.
 - **A load that forbids sprinting swallows the sprint key**, rather than scaling it to nothing — so
-  holding shift with the television does nothing at all instead of feeling broken.
+  holding shift with the television does nothing at all instead of feeling broken. A heavy load
+  swallows the jump key the same way. Both come back the frame it leaves the hands.
 - `ValuableSize` is the tuning dial and `Valuable.ApplySizePreset` is the one place a size becomes
   numbers (it runs in `Awake` and `OnValidate`, so the Inspector shows what the player will feel).
   Retune a category there and every item in it follows. `Custom` opts an item out and uses the
@@ -514,17 +847,17 @@ Price is only half a loot item; the other half is what carrying it costs you.
 
 | Size | Walk | Sprint | Pack | Items now |
 |---|---|---|---|---|
-| `Small` | 5.0 (×1) | 9.0 (×1) | yes | old radio $40, camera $60, old clock $75 |
-| `Medium` | 4.5 (×0.9) | 8.1 (×0.9) | yes | laptop $150 |
-| `Large` | 3.1 (×0.62) | **none** | **no** | old CRT television $300 — and Tom's case (not loot), through the same `Carryable.ApplyLargeLoad` |
+| `Small` | 3.5 (×1) | 6.0 (×1) | yes | old radio $40, camera $60, old clock $75 |
+| `Medium` | 3.15 (×0.9) | 5.4 (×0.9) | yes | laptop $150 |
+| `Large` | 2.8 (`heavyWalkSpeed`) | **none**, and no jump | **no** | old CRT television $300; a PlayerBody uses the same `Carryable.ApplyLargeLoad` |
 
-- The Large numbers are chosen against the monster: chase speed is **3.6**, so 3.1 means the
+- The Large numbers are chosen against the monster: chase speed is **4.0**, so 2.8 means the
   television is the one thing you cannot outrun. That is the risk/reward, not a balance accident —
-  retune `chaseSpeed` and the Large preset together.
+  retune `chaseSpeed` and `heavyWalkSpeed` together.
 - Two things fall out of this for free and should be left alone: `NoiseEmitter` reads the
   controller's *actual* speed, so carrying the television is also **quieter** than running; and
-  `PlayerInteractor`'s carrying line says `(heavy)` / `(too heavy to run)`, because being slow with
-  no explanation reads as a bug.
+  `PlayerInteractor`'s carrying line says `(heavy)` / `(too heavy to run)` / `(too heavy to run or
+  jump)`, because being slow with no explanation reads as a bug.
 - The five items are **prefabs** in `Assets/Prefabs/Loot/`, built from primitives like the rest of
   the prototype. They are not placed in the scene: `LootSpawner` instantiates them at run time under
   the `Valuables` root, which is in the environment builder's `Keep` set and is empty in the Editor.
@@ -569,12 +902,14 @@ lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
 | Shovel | 90 | A plain `Carryable`. No behaviour yet — the gameplay comes later |
 | Adrenaline | **the next revive price** (500 → 750 → 1,100 → 1,500 …) | `Adrenaline` prices itself through `IStorePriced`; see *Death and revive* |
 | Fuel can | **50** | A detached copy of the scene cans (`FuelCan`, 40 fuel = 160 s). The only fuel once the four placed cans are used |
+| UV flashlight | **500** | `UVFlashlight`, a `Flashlight` subclass. Deep violet beam, narrower and shorter than the plain flashlight, and it is the **only** way to see the footprints or the circle |
+| Magic powder | **200** | `MagicPowder`. **Infinite** — bought once, used forever. Left mouse tips the jar; scatter it anywhere to test for hidden things, and on the `RevealCircle` it brings the Level 2 door into the world |
 
 - `StoreItem.CurrentPrice` is what is shown and charged, never `price` directly. A prefab that
   implements `IStorePriced` works its own price out; everything else uses the listed number.
   `TryBuy` reads the price **once, before spawning**, because Adrenaline is dearer the moment it exists.
 
-- **The torch is store-only and no longer lies on the house floor.** The `Flashlight` scene root was
+- **The flashlight is store-only and no longer lies on the house floor.** The `Flashlight` scene root was
   removed when the store was added; buying one is how a run gets a light. Don't re-place one by hand.
 - Every store prefab sets `NavMeshModifier.ignoreFromBuild`, like every other carryable, so a dropped
   one never carves a hole in the mesh.
@@ -597,9 +932,21 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
   flood the map and there is never more than one television.
 - **At least `minLargePerRun` (1) Large piece a run.** `GuaranteeLarge` draws it from the table by
   weight among the Large kinds — *which* one is still derived, only *whether* is fixed — and it
-  replaces the cheapest piece on a Large-capable spot, so the item count is unchanged. Then the
-  **first Large piece, however it was drawn, moves beside `focus`** (Tom's camp, within
-  `focusRadius` 15 m), so the prize and the case always compete for the same trip. Never a scripted spawn.
+  replaces the cheapest piece on a Large-capable spot, so the item count is unchanged. `focus` is
+  **deliberately empty now** — there is no fixed place of interest left to draw the Large piece
+  towards, so it goes wherever depth sends it. Don't point it at anything: a landmark that always
+  holds the television would be exactly the fixed objective this level was rebuilt to remove.
+- **Nothing is ever placed inside the base.** `LootSpawner.IsInBase` rejects any spot the
+  generator's radius covers — running or not, the same `IsInsideAnyRadius` question
+  `MonsterSpawner` asks of its spawn points, because it is about the *ground* and not about
+  whether anyone has switched the light on yet. So every piece worth money is a trip outside,
+  and the house is somewhere to come back to rather than somewhere to loot. It is asked of the
+  generator rather than measured against a radius of its own, so `protectionRadius` moves both
+  together; `baseMargin` (0) widens it, `keepOutOfBase` turns it off.
+  **The rule is runtime-only** — the registry behind it is filled in `OnEnable` — so
+  `Rebuild Loot Spawn Points` still puts markers in the house and the yard. That is fine: a
+  marker is not an item, and one inside the base simply goes unused. Don't move the check into
+  `TryResolveSurface`, where it would silently do nothing for the editor tool.
 - **Depth re-pairs; it never re-rolls.** The table and the shuffle choose the same items and spots as
   always; `AssignByDepth` then sends dearer pieces to spots further from `depthCentre` (the
   generator), blurred by chance by `1 − depthBias` (0.75). So rarity, caps and separation are
@@ -615,7 +962,10 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
   | old CRT television | 300 | Large | 1.00 | **100%** (by the camp in 100%) | 40 m |
   | laptop | 150 | Medium | 0.51 | 42.4% | 44 m |
 
-  Average haul **$727**; only **2.2 items (~$103)** lie inside the generator's 22 m. The laptop's
+  Average haul **$727**. Those distances were measured *before* the base exclusion: the 2.2
+  items (~$103) a run that used to lie inside the generator's 22 m are now redrawn onto spots
+  outside it, so the haul and the table are unchanged and every column of distances is further
+  out than it reads here. The laptop's
   42% matches the unguaranteed table's 43% — the check that depth changes where, not what. The caps
   still compress the cheap items towards each other (the raw curve is 47/27/20 per draw); that is
   the caps doing their job. **Not balanced yet.**
@@ -626,7 +976,7 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
   a wall** — a downward ray that *starts* inside a wall collider passes straight through it and finds
   the floor beneath, so the ray alone would happily bury an item in masonry.
 - Items are then lifted so their **renderer bounds' bottom** sits on the surface: a pivot is not
-  always a base, and the fuel cans and torch are added to the taken-spots list so nothing spawns
+  always a base, and the fuel cans and flashlight are added to the taken-spots list so nothing spawns
   inside them.
 - Randomisation is a real **Fisher-Yates shuffle** of the points, not a random start index into a
   fixed order, and `minItemSeparation` (3m) keeps two pieces out of the same spot. `useFixedSeed` is
@@ -640,8 +990,7 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
 **`Build Prototype Environment` re-runs it**, so a rebuilt house never leaves points in its new walls.
 
 - It samples a jittered grid over the whole house footprint plus three rings round the house (yard
-  9–20m, field 20–34m, deep 34–46m) and one round Tom's camp (3.5–14m, found at `Props/TomsCamp` —
-  the woods there are dense, and the deep ring alone left two Large-capable spots), and keeps
+  9–20m, field 20–45m, deep 45–95m) and keeps
   whatever survives the probe. **It deliberately does not describe the rooms** —
   the probe rejects walls, partitions and furniture on its own, so what remains is exactly the
   walkable floor and the tops of the furniture.
@@ -653,8 +1002,8 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
 
 ### Lighting — a night you can walk by, woods that get darker
 
-The goal: without a torch you can navigate and read the house, trees, paths and props, and it
-still feels like night; the deeper into the woods, the darker, until the torch is what you see by.
+The goal: without a flashlight you can navigate and read the house, trees, paths and props, and it
+still feels like night; the deeper into the woods, the darker, until the flashlight is what you see by.
 
 - **`TimeOfDay` owns the moon and the ambient.** There is one directional light, fixed as the moon
   (`moonYaw`, `moonElevation`), so the canopy still throws shadows. There is no sun and no day.
@@ -669,11 +1018,65 @@ still feels like night; the deeper into the woods, the darker, until the torch i
 - **`NightDepth` on `Main Camera` is the whole "further from the house, darker" gradient**, measured
   from the `Generator` with a smoothstep from `clearRadius` 18 m to `deepRadius` 45 m. It scales the
   ambient down to `deepAmbient` (0.3) and thickens fog from 0.022 to 0.055. **Ambient does most of
-  the work on purpose:** fog dims the torch beam as much as the moonlight, so darkening the woods
-  with fog alone would make the torch useless exactly where it is needed. It is a per-viewer visual
+  the work on purpose:** fog dims the flashlight beam as much as the moonlight, so darkening the woods
+  with fog alone would make the flashlight useless exactly where it is needed. It is a per-viewer visual
   (nothing in the simulation reads fog or ambient), so in co-op each client runs its own. Each
   `LateUpdate` it writes `TimeOfDay`'s base ambient × its depth factor, never a multiple of what is
   already in `RenderSettings`, so it cannot compound — never write ambient from anywhere else.
+- **`DarkQuarter` on `Systems` is the corner of the map you need a bought flashlight for.**
+  A true quarter of the 200 × 200 square — one of the four corners, quadrants meeting at
+  `mapCentre` (the origin, where the ground is centred) — **not** a wedge. It fades in over
+  `edgeSoftness` **12 m** across each quadrant boundary, and from `innerRadius` **22 m** (the
+  generator's own `protectionRadius`, so the dark starts exactly where the protection ends) to
+  `fullRadius` **35 m**, so the yard is never dark whichever corner is drawn. At full strength it
+  multiplies what `NightDepth` has already left: ambient × `ambientScale` (**0.28**), the moon ×
+  `moonScale` (**0.05**) and fog × `fogScale` (1.25). Measured over 200 runs it covers **23.3%**
+  of the map, **19.5%** of it at full strength — the rest of the quarter is the bite the
+  generator's yard takes out of its inside corner, plus the soft edges.
+- **`moonScale` is what actually makes it dark, and scaling ambient alone does not work.**
+  Ambient only empties the *shadows*; the moon is a directional light and goes on picking out
+  every surface facing it, so the first version (ambient 0.28, moon untouched) was measurably
+  three and a half times darker and still perfectly readable in play — trunks, canopies and
+  ground all legible. Taking the moon to **0.05** as well is what turns the corner into
+  near-total black: verified by capture at 40 m, where shapes are only just sensed and nothing
+  can be read. It is cloud over one corner of the sky, in effect. **Retune `moonScale` first**;
+  `ambientScale` only moves what is already in shadow.
+- The moon is written by `NightDepth` as `TimeOfDay.nightIntensity` × the factor, **never** as a
+  multiple of what is already on the light, exactly as ambient is — so it cannot compound, and
+  `NightDepth.OnDisable`'s `ApplyLighting()` hands the full moon back. It is a per-viewer visual
+  like the rest of that script: each client lights its own scene and nothing in the simulation
+  reads a light's intensity. Never write `sun.intensity` from anywhere else.
+- **The flashlight is untouched by all three dials**, which is the whole point: a real light
+  against a near-black corner reads enormously, and `fogScale` is kept at 1.25 because fog is
+  the one dial that would dim the beam too.
+- **Which corner is drawn is a fresh roll every run, and it is even.** Measured over 2,000 runs:
+  south-west 25.8%, south-east 25.1%, north-west 23.6%, north-east 25.6% (+z is north, +x east).
+  It is a reservoir draw over the corners that survive the trail check — one pass, no attempt
+  loop. `logChoice` prints the corner at run start ("the north-west quarter of the map is the
+  dark one this run"), which is the only way to know without walking there; selecting `Systems`
+  draws it in the Scene view.
+- **The corner the Level 2 trail runs into is struck out, and so is any corner within
+  `clearance` (20 m) of the door.** Measured over 2,000 runs with the trail on every bearing,
+  the door fell in *any* darkness at all **0 times**. `DoorDistanceTo` measures point-to-quadrant,
+  so "in it" and "nearly in it" are one number; if every corner were somehow refused it falls
+  back to the one furthest from the door rather than failing.
+- **It bites close in, and that is the whole reason `fullRadius` is 35 m.** Ambient outside →
+  inside runs **40 m 0.86 → 0.24**, 50 m 0.71 → 0.20, 70 m 0.40 → 0.11. An early version only
+  reached full strength at 55 m and was **invisible**: captures at 70 m with and against it are
+  indistinguishable, because the woods out there are already near-black and ambient has nothing
+  left to take. The band that still reads by moonlight — roughly 25–55 m — is the only band
+  worth darkening, so never push `fullRadius` back out.
+- **A line of eighteen barely-visible footprints hidden in the darkest part of the map would
+  make the only thread the player has a matter of luck** — that is why the trail check exists
+  at all, and why it is a strike-out rather than a retry.
+- **The corner is drawn on the first frame, not in `Start`.** `Level2Site` rolls the trail's
+  bearing in *its* `Start`, and the order of two `Start`s is undefined — so `DarkQuarter`
+  chooses lazily, the first time anything asks `Corner` or `Weight`, by which point the trail
+  has certainly been placed. Same reasoning as `Level2Site.DoorSpotClear`: never depend on
+  execution order. The *choice* is authority-owned shared state (`Instance`, `HasAuthority`);
+  the darkness itself is drawn per viewer by `NightDepth`, which stays the only writer of
+  ambient and fog. `Weight(point)` is a pure query, so a HUD or a future monster that hunts the
+  dark can ask it freely.
 - **Where the light is, and deliberately isn't.** The generator circuit (house lamps, work and porch
   lights) is steady and switched by `Generator`. Three old lamps on their own dying supply carry
   `LightFlicker`: `Props/Lamps/PathLamp` where the path leaves the trees, `Props/Shed/ShedLamp`, and
@@ -697,12 +1100,14 @@ All placeholder HUD goes through `Hud` (`Assets/Scripts/Hud.cs`) — never raw `
 12px dark-grey default is unreadable against a night field. `Hud.Row(n, text, tint)` for corner
 readouts, `Hud.CentrePrompt(text)` for the interaction prompt. Sizes scale with screen height.
 
-Row numbers are claimed and must not collide. **Left column** (`Hud.Row`): **0-1** free (the old
-clock readout), **2** Generator, **3** PlayerVitals, **4** MonsterSpawner, **5 and down** `MonsterDebugHud`
+Row numbers are claimed and must not collide. **Left column** (`Hud.Row`): **0** the crouch readout
+(`PlayerMovement`, only while crouched), **1** stamina (`PlayerMovement`, only while below full), **2** Generator, **3** PlayerVitals, **4** MonsterSpawner, **5 and down** `MonsterDebugHud`
 (last noise, then one line per monster — set its `firstRow` if you need row 5 back).
 **Right column** (`Hud.RowRight`):
 **0** money balance, **1** the `+$100` change popup, both drawn by `MoneyHud`, **2** the
-`LevelCompleteHud` line once the map shrinks away. The two columns are numbered separately, so they
+`LevelCompleteHud` line once the map shrinks away, **3** the field-revive timer (`Revival`, only
+while an injection is running), **4** the key maker's `n/4` (`KeyMaker`, only once the first
+fragment is in). The two columns are numbered separately, so they
 cannot collide. Claim the next free number for a new readout.
 
 Centred panels — the store, `ReadableHud`'s note, `LevelCompleteHud`'s map — claim no row. Dark text

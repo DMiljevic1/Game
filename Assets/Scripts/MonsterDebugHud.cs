@@ -84,7 +84,15 @@ public class MonsterDebugHud : MonoBehaviour
                 return;
             }
 
-            Hud.Row(row++, string.Format("{0}: {1}  agitation {2:0.0}", m.name, m.State, m.Agitation),
+            // What it is doing, plus the one thing you cannot see from the outside: whether
+            // it has given up on the area or is still keeping its round near it.
+            string extra = m.IsSearching ? string.Format("  {0} left to check", m.SearchesLeft)
+                         : m.InterestTimeLeft > 0f ? string.Format("  interested {0:0}s", m.InterestTimeLeft)
+                         : m.State == MonsterState.Patrol ? string.Format("  house in {0:0}s", m.ProwlTimeLeft)
+                         : "";
+
+            Hud.Row(row++, string.Format("{0}: {1}  agitation {2:0.0}{3}",
+                                         m.name, m.State, m.Agitation, extra),
                     StateColor(m.State));
             listed++;
         }
@@ -102,6 +110,9 @@ public class MonsterDebugHud : MonoBehaviour
             case MonsterState.Chase: return new Color(1f, 0.35f, 0.3f);
             case MonsterState.Alerted: return new Color(1f, 0.7f, 0.25f);
             case MonsterState.Investigate: return new Color(1f, 0.95f, 0.45f);
+            case MonsterState.Search: return new Color(0.85f, 1f, 0.5f);
+            case MonsterState.Prowl: return new Color(0.8f, 0.55f, 1f);
+            case MonsterState.Leaving: return new Color(0.6f, 1f, 0.85f);
             default: return new Color(0.65f, 0.85f, 1f);
         }
     }

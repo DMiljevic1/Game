@@ -31,9 +31,15 @@ public static class PrototypeEnvironmentBuilder
     const float FoyerKitchenZ = -1.5f;
     const float LivingBedroomZ = 0.5f;
 
-    const float GroundHalf = 55f;     // playable square; the boundary sits on its edges
-    const float ForestInner = 14f;
-    const float ForestOuter = 44f;
+    const float GroundHalf = 100f;    // playable square; the boundary sits on its edges
+
+    // Forest bands. Density drops with distance on purpose: the near woods have to read as
+    // a wall you push through, but a 200 m map at that density is thousands of renderers
+    // and a NavMesh bake to match. Thinner far out is what keeps the map affordable.
+    const float ForestInner = 14f;    // trees thin out this close, so the clearing reads as one
+    const float ForestNear = 55f;     // dense stand around the house
+    const float ForestMid = 88f;      // thinner, the long walks
+    const float ForestEdge = 3f;      // the outer band stops this far short of the boundary
 
     static readonly Vector3 GeneratorPos = new Vector3(8.8f, 0f, -7.2f);
     static readonly Vector3 PlayerSpawn = new Vector3(4.7f, 1.4f, -12.5f);
@@ -50,6 +56,7 @@ public static class PrototypeEnvironmentBuilder
 
     // ------------------------------------------------------------- materials
     const string MatDir = "Assets/Materials/Env";
+    const string ObjectivePrefabDir = "Assets/Prefabs/Objective";
 
     static Material grass, dirt, wallExt, wallInt, floorWood, roofMat, wood, plank,
                     fabric, metalDark, metalPale, glass, bark, foliage, foliageAlt,
@@ -58,12 +65,31 @@ public static class PrototypeEnvironmentBuilder
     // Trunk positions, so props and the path can avoid growing inside a tree.
     static readonly List<Vector2> occupied = new List<Vector2>();
 
-    // Where Tom's case is put out at run time. Built with Props, wired into Expedition.
-    static Transform campPoint;
+    // Old logging tracks, as polylines from the house clearing outward. They fork rather than
+    // radiate, so the map reads as a place people used rather than a hub, and they all give
+    // out somewhere in the trees -- they are something to navigate by, never a route to
+    // anything. Nothing is placed at their ends on purpose: a track that led to the objective
+    // would tell the player where to look.
+    static readonly Vector2[][] Trails =
+    {
+        // north-west: past the shed to the woodcutter's stand, on to the ruins
+        new[] { new Vector2(-4f, 11f), new Vector2(-14f, 21f), new Vector2(-26f, 30f), new Vector2(-44f, 34f), new Vector2(-58f, 36f) },
+        // north-east: out to the fallen-roof cabin, then north to the hunting stand
+        new[] { new Vector2(5f, 12f), new Vector2(12f, 30f), new Vector2(18f, 52f), new Vector2(-6f, 64f), new Vector2(-30f, 70f) },
+        // east: the garage, forking north to the culvert and south to the far house
+        new[] { new Vector2(11f, -7f), new Vector2(24f, -16f), new Vector2(34f, -22f) },
+        new[] { new Vector2(34f, -22f), new Vector2(46f, -4f), new Vector2(52f, 22f) },
+        new[] { new Vector2(34f, -22f), new Vector2(56f, -34f), new Vector2(74f, -48f) },
+        // south: down past the fence line to the quarry
+        new[] { new Vector2(4.7f, -21f), new Vector2(8f, -46f), new Vector2(10f, -70f), new Vector2(10f, -86f) },
+        // west and south-west: the wreck to the green-door cabin, and a track that gives out
+        // well short of Tom's camp -- the paint marks take over from there
+        new[] { new Vector2(-12.5f, -14f), new Vector2(-28f, -12f), new Vector2(-44f, -6f) },
+        new[] { new Vector2(-14f, -24f), new Vector2(-28f, -42f), new Vector2(-38f, -58f) },
+    };
 
-    // Deep in the south-west woods, along the line the wreck's headlight points: far
-    // enough out to be properly dark, well inside the treeline so it is not at the wall.
-    static readonly Vector2 CampTarget = new Vector2(-18f, -38f);
+    const float TrailHalfWidth = 1.1f;    // the dirt strip itself
+    const float TrailClear = 2.2f;        // nothing grows this close to the centreline
 
     [MenuItem("Lab/Environment/Build Prototype Environment")]
     public static void Build()
@@ -232,7 +258,7 @@ public static class PrototypeEnvironmentBuilder
         bushMat    = Mat("Env_Bush",        new Color(0.040f, 0.058f, 0.038f), 0.03f, 0f, Color.black);
         lampWarm   = Mat("Light_WarmBulb",  new Color(0.320f, 0.230f, 0.130f), 0.30f, 0f, new Color(3.2f, 2.0f, 0.85f));
         lampDead   = Mat("Light_DeadBulb",  new Color(0.180f, 0.180f, 0.170f), 0.60f, 0f, Color.black);
-        // Pale, so Tom's trail marks and paper read in a torch beam against near-black bark.
+        // Pale, so Tom's trail marks and paper read in a flashlight beam against near-black bark.
         paint      = Mat("Env_Paint",       new Color(0.420f, 0.410f, 0.370f), 0.10f, 0f, Color.black);
         AssetDatabase.SaveAssets();
     }
@@ -251,6 +277,8 @@ public static class PrototypeEnvironmentBuilder
         // A worn path up to the porch, so the approach reads even in the dark.
         Box(t, "Ground_Path", 3.4f, 6.0f, GroundTop, GroundTop + 0.02f, -21f, -5.6f, dirt, false);
         Box(t, "Ground_Yard", 1.4f, 10.6f, GroundTop, GroundTop + 0.02f, -10.5f, -5.6f, dirt, false);
+
+        BuildTrails(t);
         return t;
     }
 
@@ -389,13 +417,6 @@ public static class PrototypeEnvironmentBuilder
     {
         Transform house = Root("House");
 
-        // The safe house as a volume: where a body has to lie for Adrenaline to revive it.
-        // Sized from the footprint, so a resized house resizes it too.
-        ReviveZone zone = house.GetComponent<ReviveZone>();
-        if (zone == null) zone = house.gameObject.AddComponent<ReviveZone>();
-        zone.center = new Vector3(0f, (FloorTop + RoofY) * 0.5f, 0f);
-        zone.size = new Vector3(HouseHalfX * 2f, RoofY - FloorTop + 0.5f, HouseHalfZ * 2f);
-
         Transform shell = Group(house, "Shell");
         Transform walls = Group(house, "Walls");
         Transform doors = Group(house, "Doors");
@@ -488,10 +509,14 @@ public static class PrototypeEnvironmentBuilder
         Readable note = notice.AddComponent<Readable>();
         note.prompt = "Read the notice";
         note.title = "Notice";
+        // The whole tutorial, in three lines: the gate is locked, the key is in four pieces,
+        // and they are out there somewhere. It deliberately does NOT say where -- nothing in
+        // the level does, because the fragments move every run.
         note.text = "KEEP THE GENERATOR RUNNING.\nDON'T RUN.\n\n" +
-                    "Tom took the map into the woods, past the car. We couldn't wait any longer.\n\n" +
-                    "- R.\n\n" +
-                    "(Under the writing, a pencil sketch: the house, the car, a row of trees - and an X beyond them.)";
+                    "The gate's chained and we broke the key up between us. Four pieces. " +
+                    "We went out to hide them and not all of us came back.\n\n" +
+                    "Find all four, fit them in the lock, and go.\n\n" +
+                    "- R.";
 
         return house;
     }
@@ -643,13 +668,7 @@ public static class PrototypeEnvironmentBuilder
              new Vector3(0.72f, 1.7f, 0.07f), metalPale, new Vector3(0f, 62f, 0f));
         // Table and two chairs.
         Table(kitchen, "KitchenTable", new Vector3(3.9f, 0f, 1.6f), 1.6f, 0.95f, 0.76f, wood);
-        // Where Tom's case is opened and the level ends. It offers nothing unless the
-        // case is in your hands, so it stays an ordinary table until then.
-        Transform kitchenTable = kitchen.Find("KitchenTable");
-        Transform caseRest = Group(kitchenTable, "CaseRest");
-        caseRest.localPosition = new Vector3(-0.3f, y + 0.76f, -0.12f);   // clear of the pot and the mug
-        caseRest.localEulerAngles = new Vector3(0f, 8f, 0f);
-        kitchenTable.gameObject.AddComponent<CaseTable>().restPoint = caseRest;
+        BuildKeyMaker(kitchen.Find("KitchenTable"), y + 0.76f);
         Chair(kitchen, "Chair_A", new Vector3(3.9f, 0f, 0.75f), 0f);
         Chair(kitchen, "Chair_B", new Vector3(3.2f, 0f, 2.55f), 172f);
         Prim(kitchen, "Pot", PrimitiveType.Cylinder, new Vector3(4.2f, y + 0.86f, 1.5f),
@@ -742,8 +761,47 @@ public static class PrototypeEnvironmentBuilder
         if (p.x > 2.4f && p.x < 7.0f && p.y > -22f && p.y < -5f) return true;                // path
         if (Vector2.Distance(p, new Vector2(PlayerSpawn.x, PlayerSpawn.z)) < 4f) return true;
 
+
+        // The tracks are cleared before a single tree is placed. Doing it the other way
+        // round -- growing the forest and then carving -- leaves trunks standing in the
+        // path, because Scatter has already committed.
+        foreach (Vector2[] trail in Trails)
+            for (int i = 0; i < trail.Length - 1; i++)
+                if (DistanceToSegment(p, trail[i], trail[i + 1]) < TrailClear) return true;
+
         foreach (Vector2 o in occupied)
             if (Vector2.SqrMagnitude(o - p) < clearance * clearance) return true;
+        return false;
+    }
+
+    /// <summary>Shortest distance from a point to a line segment, in the ground plane.</summary>
+    static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+    {
+        Vector2 ab = b - a;
+        float lengthSq = ab.sqrMagnitude;
+        if (lengthSq < 0.0001f) return Vector2.Distance(p, a);
+
+        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / lengthSq);
+        return Vector2.Distance(p, a + ab * t);
+    }
+
+    /// <summary>
+    /// Scatter over the SQUARE out to <paramref name="halfExtent"/>, skipping anything inside
+    /// <paramref name="rMin"/>. The polar <see cref="Scatter"/> can only ever fill a disc, which
+    /// on a square map leaves the four corners as bare grass -- about a quarter of a 200 m
+    /// level. This is what closes them.
+    /// </summary>
+    static bool ScatterSquare(float rMin, float halfExtent, float clearance, out Vector2 result)
+    {
+        for (int attempt = 0; attempt < 24; attempt++)
+        {
+            Vector2 p = new Vector2(Random.Range(-halfExtent, halfExtent), Random.Range(-halfExtent, halfExtent));
+            if (p.sqrMagnitude < rMin * rMin) continue;
+            if (Blocked(p, clearance)) continue;
+            result = p;
+            return true;
+        }
+        result = Vector2.zero;
         return false;
     }
 
@@ -773,45 +831,87 @@ public static class PrototypeEnvironmentBuilder
         Transform rocks = Group(forest, "Rocks");
 
         int n = 0;
-        // Main stand. Trees thin out near the house so the clearing reads as one.
-        for (int i = 0; i < 200; i++)
+        // Near stand, around the house. The densest woods in the level: this is the band
+        // that has to read as "you cannot see past this" from the porch.
+        for (int i = 0; i < 300; i++)
         {
             Vector2 p;
-            if (!Scatter(ForestInner, ForestOuter, 2.9f, out p)) continue;
+            if (!Scatter(ForestInner, ForestNear, 2.9f, out p)) continue;
             occupied.Add(p);
             if (Random.value < 0.72f) Pine(pines, "Pine_" + (n++), p, Random.Range(4.2f, 7.4f));
             else Broadleaf(broadleaf, "Tree_" + (n++), p, Random.Range(3.8f, 5.6f));
         }
 
-        // A closed outer ring: the eye should never find a way out of the woods.
-        for (int i = 0; i < 130; i++)
+        // Mid band: thinner per square metre but far larger, so it is still a long walk
+        // through trees. Spacing is wider, which is also what keeps the bake affordable.
+        for (int i = 0; i < 420; i++)
         {
             Vector2 p;
-            if (!Scatter(ForestOuter, GroundHalf - 4f, 2.4f, out p)) continue;
+            if (!Scatter(ForestNear, ForestMid, 3.6f, out p)) continue;
+            occupied.Add(p);
+            if (Random.value < 0.78f) Pine(pines, "Pine_Mid_" + (n++), p, Random.Range(4.6f, 8.0f));
+            else Broadleaf(broadleaf, "Tree_Mid_" + (n++), p, Random.Range(4.0f, 6.0f));
+        }
+
+        // The outer band, filled over the SQUARE so the corners are woods too. A disc leaves
+        // roughly a quarter of a 200 m map as open grass, which reads as the edge of the world.
+        for (int i = 0; i < 340; i++)
+        {
+            Vector2 p;
+            if (!ScatterSquare(ForestMid, GroundHalf - ForestEdge, 2.6f, out p)) continue;
             occupied.Add(p);
             Pine(pines, "Pine_Edge_" + (n++), p, Random.Range(5.0f, 8.0f));
         }
 
-        for (int i = 0; i < 22; i++)
+        for (int i = 0; i < 55; i++)
         {
             Vector2 p;
-            if (!Scatter(ForestInner - 2f, ForestOuter, 2.6f, out p)) continue;
+            if (!Scatter(ForestInner - 2f, ForestMid, 2.6f, out p)) continue;
             occupied.Add(p);
             DeadTree(dead, "Dead_" + i, p, Random.Range(3.0f, 5.5f));
         }
 
-        for (int i = 0; i < 110; i++)
+        // Undergrowth over the square too, for the same corner reason.
+        for (int i = 0; i < 300; i++)
         {
             Vector2 p;
-            if (!Scatter(ForestInner - 4f, GroundHalf - 6f, 1.4f, out p)) continue;
+            if (!ScatterSquare(ForestInner - 4f, GroundHalf - 5f, 1.4f, out p)) continue;
             Bush(bushes, "Bush_" + i, p);
         }
 
-        for (int i = 0; i < 60; i++)
+        for (int i = 0; i < 180; i++)
         {
             Vector2 p;
-            if (!Scatter(ForestInner - 5f, GroundHalf - 6f, 1.6f, out p)) continue;
+            if (!ScatterSquare(ForestInner - 5f, GroundHalf - 5f, 1.6f, out p)) continue;
             Rock(rocks, "Rock_" + i, p);
+        }
+    }
+
+    /// <summary>
+    /// The dirt strips the trails are actually made of. Render-only quads laid segment by
+    /// segment, like Ground_Path -- they are navigation, not collision, and the forest was
+    /// already kept off them by <see cref="Blocked"/> before a tree was placed.
+    /// </summary>
+    static void BuildTrails(Transform ground)
+    {
+        Transform t = Group(ground, "Trails");
+
+        for (int r = 0; r < Trails.Length; r++)
+        {
+            Vector2[] route = Trails[r];
+            for (int i = 0; i < route.Length - 1; i++)
+            {
+                Vector2 a = route[i], b = route[i + 1];
+                Vector2 mid = (a + b) * 0.5f;
+                float length = Vector2.Distance(a, b);
+                float yaw = Mathf.Atan2(b.x - a.x, b.y - a.y) * Mathf.Rad2Deg;
+
+                // A hair above the ground and a hair below the house floors, same as the path.
+                Prim(t, "Trail_" + r + "_" + i, PrimitiveType.Cube,
+                     new Vector3(mid.x, GroundTop + 0.01f, mid.y),
+                     new Vector3(TrailHalfWidth * 2f, 0.02f, length + TrailHalfWidth),
+                     dirt, new Vector3(0f, yaw, 0f), false);
+            }
         }
     }
 
@@ -952,20 +1052,28 @@ public static class PrototypeEnvironmentBuilder
         Prim(shed, "Shed_Roof", PrimitiveType.Cube, new Vector3(0f, g + 2.35f, 0f), new Vector3(4.1f, 0.12f, 3.4f), roofMat, new Vector3(-8f, 0f, 0f));
         Box(shed, "Shed_Crate", -1.2f, -0.5f, g, g + 0.7f, 0.3f, 1.0f, plank);
 
-        // Nina's drawing, pinned inside the back wall. Optional: nothing needs it read, but
-        // anyone who looks learns the one rule the grown-ups got wrong.
+        // Nina's drawing, pinned inside the back wall. Optional -- nothing gates on it -- but
+        // it is the only place in the level that says what the two odd tools are FOR. Said as
+        // a child explaining a game she made up, never as a tutorial: the player should work
+        // out that she is describing the UV flashlight and the powder, not be told.
         GameObject drawing = Prim(shed, "Shed_Drawing", PrimitiveType.Cube, new Vector3(0.45f, g + 1.35f, 1.27f),
                                   new Vector3(0.42f, 0.3f, 0.01f), paint, new Vector3(0f, 0f, 3f));
         Readable picture = drawing.AddComponent<Readable>();
         picture.prompt = "Look at the drawing";
         picture.text = "A child's crayon drawing, pinned to the wall.\n\n" +
-                       "A yellow house inside a big yellow circle. Grey people all the way round the outside - no eyes, huge ears.\n\n" +
-                       "Across the top, in big wobbly letters:  SHHH\n\n" +
+                       "Two pictures, side by side.\n\n" +
+                       "On the left, a purple lamp shining down on the grass. Little footprints " +
+                       "glow under it, going off the edge of the paper. Underneath:  " +
+                       "THE PURPLE LIGHT SHOWS WHERE THINGS WENT\n\n" +
+                       "On the right, a stick girl tipping a jar. Where the dust lands there is " +
+                       "a door, drawn over in thick crayon like she pressed hard. Underneath:  " +
+                       "THE DUST SHOWS WHAT IS STILL THERE\n\n" +
+                       "Across the top, in big wobbly letters:  I CAN SEE THEM AND YOU CANT\n\n" +
                        "In the corner:  NINA";
 
         // --- old lamps: the only light out here the generator does not own ------------
         // Few, and all within sight of the house: the way in, the shed, the wreck. Past
-        // them the woods belong to the moon and the torch. None cast shadows (a point
+        // them the woods belong to the moon and the flashlight. None cast shadows (a point
         // light's shadow costs six atlas slices) except the headlight, a spot, which costs one.
         Transform lamps = Group(props, "Lamps");
 
@@ -983,8 +1091,6 @@ public static class PrototypeEnvironmentBuilder
         beam.spotAngle = 55f;
         beam.shadows = LightShadows.Soft;
         beam.transform.localEulerAngles = new Vector3(8f, 90f, 0f);   // along the car's +x, dipped
-
-        campPoint = BuildTomsCamp(props, beam.transform);
 
         Light OldLamp(Transform parent, string name, Vector3 pos, float intensity, float range,
                       float stuttersPerSecond, bool hanging)
@@ -1012,173 +1118,186 @@ public static class PrototypeEnvironmentBuilder
         }
     }
 
-    // ------------------------------------------------------------- Tom's camp
+    // ------------------------------------------------------------- key maker
     /// <summary>
-    /// Finds a clear patch near <see cref="CampTarget"/> and builds the camp there. Returns
-    /// the point Expedition spawns the case on -- the case itself is a run-time object, like
-    /// the loot, so a rebuild can never lose it or bake a hole round it.
+    /// The device on the kitchen table that turns four fragments into the key. Four sockets
+    /// in a row with a lamp over each, so how far along you are is readable from the doorway
+    /// without opening anything.
     /// </summary>
-    static Transform BuildTomsCamp(Transform props, Transform headlight)
+    static void BuildKeyMaker(Transform table, float topY)
     {
-        Physics.SyncTransforms();   // the trunks and rocks were created moments ago
-
-        Vector2 spot = CampTarget;
-        bool found = false;
-        for (float r = 0f; r <= 8f && !found; r += 1f)
+        if (table == null)
         {
-            int steps = r == 0f ? 1 : 12;
-            for (int i = 0; i < steps; i++)
-            {
-                float a = i / (float)steps * Mathf.PI * 2f;
-                Vector2 p = CampTarget + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
-
-                // A couple of metres clear of trunks and rocks, so the case is not wedged
-                // against a tree. The box starts above the ground, so the ground never counts.
-                if (Physics.CheckBox(new Vector3(p.x, GroundTop + 1.1f, p.y), new Vector3(1.8f, 0.9f, 1.8f))) continue;
-
-                spot = p;
-                found = true;
-                break;
-            }
+            Debug.LogError("No KitchenTable to put the key maker on; Level 1 cannot be finished.");
+            return;
         }
-        if (!found) Debug.LogWarning("No clear spot for Tom's camp near " + CampTarget + "; placing it anyway.");
 
-        Transform camp = Group(props, "TomsCamp");
-        camp.localPosition = new Vector3(spot.x, GroundTop, spot.y);
-        // Facing back towards the house: he was on his way home.
-        camp.localEulerAngles = new Vector3(0f, Mathf.Atan2(-spot.x, -spot.y) * Mathf.Rad2Deg, 0f);
+        Transform t = Group(table, "KeyMaker");
+        t.localPosition = new Vector3(-0.28f, topY, -0.06f);
+        t.localEulerAngles = new Vector3(0f, 8f, 0f);
 
-        Transform point = Group(camp, "CasePoint");
-        point.localPosition = new Vector3(0.4f, 0.02f, 0.3f);
-        point.localEulerAngles = new Vector3(0f, 17f, 0f);
+        // A squat iron press. Its body is the collider the player aims at; it stands proud
+        // of the tabletop so the aim ray finds it rather than the table.
+        Box(t, "Body", -0.42f, 0.42f, 0f, 0.24f, -0.22f, 0.22f, metalDark);
+        Box(t, "Backplate", -0.42f, 0.42f, 0.24f, 0.46f, 0.12f, 0.20f, metalPale);
 
-        // What he left: no body and no light, just what you drop when you run. All
-        // render-only, so the camp stays walkable and bakes like open ground.
-        Box(camp, "Camp_Scuff", -1.4f, 1.4f, 0f, 0.015f, -1.2f, 1.2f, dirt, false);
-        Prim(camp, "Camp_Coat", PrimitiveType.Cube, new Vector3(1.15f, 0.03f, -0.55f),
-             new Vector3(0.7f, 0.05f, 0.95f), fabric, new Vector3(0f, -24f, 4f), false);
+        Transform[] sockets = new Transform[4];
+        Light[] lamps = new Light[4];
 
-        // His lantern, on its side and long out of oil.
-        Transform lantern = Group(camp, "Camp_Lantern");
-        lantern.localPosition = new Vector3(-0.65f, 0.085f, -0.25f);
-        lantern.localEulerAngles = new Vector3(0f, 35f, 90f);
-        Prim(lantern, "Lantern_Glass", PrimitiveType.Cylinder, Vector3.zero, new Vector3(0.15f, 0.12f, 0.15f), lampDead, default(Vector3), false);
-        Prim(lantern, "Lantern_Cap", PrimitiveType.Cylinder, new Vector3(0f, 0.13f, 0f), new Vector3(0.17f, 0.02f, 0.17f), metalDark, default(Vector3), false);
-        Prim(lantern, "Lantern_Base", PrimitiveType.Cylinder, new Vector3(0f, -0.13f, 0f), new Vector3(0.17f, 0.02f, 0.17f), metalDark, default(Vector3), false);
+        for (int i = 0; i < 4; i++)
+        {
+            float x = -0.3f + i * 0.2f;
 
-        // The tin he marked the trees from, and what spilled when it went over.
-        Prim(camp, "Camp_PaintTin", PrimitiveType.Cylinder, new Vector3(-0.3f, 0.07f, 0.95f),
-             new Vector3(0.12f, 0.07f, 0.12f), metalPale, default(Vector3), false);
-        Box(camp, "Camp_PaintSpill", -0.2f, 0.25f, 0.016f, 0.02f, 0.9f, 1.25f, paint, false);
+            // The socket the fragment is seated in, and the rim around it.
+            Box(t, "Rim_" + i, x - 0.07f, x + 0.07f, 0.24f, 0.27f, -0.09f, 0.09f, metalPale);
 
-        // The last mark is an X, like the one on the notice's sketch.
-        Collider marked = NearestTrunk(camp.position, 4.5f, null);
-        if (marked != null) PaintCross(camp, marked, camp.position);
+            Transform socket = Group(t, "Socket_" + i);
+            socket.localPosition = new Vector3(x, 0.28f, 0f);
+            sockets[i] = socket;
 
-        PaintTrail(headlight, camp.position, marked);
-        return point;
+            // A lamp per socket, lit as that fragment goes in. Tiny range: it is a readout,
+            // not lighting, and the house already has its own circuit.
+            GameObject bulbGo = new GameObject("Lamp_" + i);
+            bulbGo.transform.SetParent(t, false);
+            bulbGo.transform.localPosition = new Vector3(x, 0.40f, 0.16f);
+
+            Light lamp = bulbGo.AddComponent<Light>();
+            lamp.type = LightType.Point;
+            lamp.color = new Color(0.55f, 0.85f, 1f);
+            lamp.intensity = 1.4f;
+            lamp.range = 1.2f;
+            lamp.shadows = LightShadows.None;
+            lamp.enabled = false;
+            lamps[i] = lamp;
+
+            Prim(bulbGo.transform, "Bulb_" + i, PrimitiveType.Sphere, Vector3.zero,
+                 new Vector3(0.035f, 0.035f, 0.035f), lampWarm, default(Vector3), false);
+        }
+
+        // Where the finished key is laid down, clear of the sockets.
+        Transform output = Group(t, "KeyRest");
+        output.localPosition = new Vector3(0.62f, 0.02f, -0.02f);
+
+        KeyMaker maker = t.gameObject.AddComponent<KeyMaker>();
+        maker.sockets = sockets;
+        maker.indicatorLights = lamps;
+        maker.output = output;
     }
 
-    // Tom's paint marks: from the wreck's headlight to his camp. The beam shows where the
-    // way starts; the marks carry on past where it gives out, and veer west -- the way he
-    // actually went. Pale, so faint by moonlight and plain in a torch beam.
-    const float TrailStart = 4f;       // first mark this far along the beam
-    const float TrailBend = 10f;       // where the marks leave the beam's line
-    const float TrailSpacing = 4f;     // close enough that the next mark is in the torch beam
-    const float TrailReach = 4.5f;     // how far from the line a marked tree may stand
-
-    static void PaintTrail(Transform headlight, Vector3 camp, Collider crossed)
+    // ------------------------------------------------------- the way to level 2
+    /// <summary>
+    /// The UV trail and what it leads to: a line of footprints running out from the near
+    /// woods to a mark at the edge of the map, and the door that mark hides.
+    ///
+    /// Everything here is laid out along local **+z** and the root sits at the house, because
+    /// <see cref="Level2Site"/> swings the whole thing onto a random bearing at run time --
+    /// so the direction you must walk changes every run while the shape stays as authored.
+    ///
+    /// The footprints and the circle are render-only and carry <see cref="UVRevealed"/>: they
+    /// do not exist to the eye, to a normal flashlight or to the NavMesh. Only the door gets
+    /// colliders, and those are off until the powder is scattered.
+    /// </summary>
+    static void BuildLevel2Site(Transform props)
     {
-        Vector3 along = headlight.forward;
-        along.y = 0f;
-        along.Normalize();
+        Transform root = Group(props, "Level2Site");
 
-        Vector3[] route =
+        // Nothing here may touch the NavMesh. At bake time the site is still sitting on its
+        // authored bearing and the door's colliders are still enabled (Awake has not run in
+        // edit mode), so without this the bake would carve a hole where the door ISN'T at
+        // run time -- Level2Site swings the whole thing elsewhere before the level starts.
+        // Same rule every carryable follows.
+        root.gameObject.AddComponent<NavMeshModifier>().ignoreFromBuild = true;
+
+        // Starts well out in the woods, not at the door: the player has to already be
+        // exploring with the flashlight on before there is anything to find.
+        const float first = 40f;
+        const float last = 84f;
+        const float step = 2.6f;
+        const float circleAt = 88f;
+        const float doorAt = 90.5f;
+
+        int n = 0;
+        for (float z = first; z <= last; z += step, n++)
         {
-            Flat(headlight.position + along * TrailStart),
-            Flat(headlight.position + along * TrailBend),
-            Flat(camp)
-        };
+            // Left, right, left: a walking line rather than a dotted one.
+            float side = (n % 2 == 0 ? -1f : 1f) * 0.22f;
 
-        float total = 0f;
-        for (int i = 1; i < route.Length; i++) total += Vector3.Distance(route[i - 1], route[i]);
+            Transform foot = Group(root, "Step_" + n);
+            foot.localPosition = new Vector3(side, 0.02f, z);
+            foot.localEulerAngles = new Vector3(0f, Random.Range(-9f, 9f), 0f);
 
-        // The tree with the X on it is already marked; it must not get a band as well.
-        HashSet<Collider> used = new HashSet<Collider>();
-        if (crossed != null) used.Add(crossed);
-        int marks = 0;
+            // A sole and a heel, so it reads as a footprint and not a smudge.
+            Prim(foot, "Sole", PrimitiveType.Cube, new Vector3(0f, 0f, 0.05f),
+                 new Vector3(0.11f, 0.012f, 0.20f), paint, default(Vector3), false);
+            Prim(foot, "Heel", PrimitiveType.Cube, new Vector3(0f, 0f, -0.10f),
+                 new Vector3(0.09f, 0.012f, 0.08f), paint, default(Vector3), false);
 
-        // Stops short of the camp: the X there is the last mark.
-        for (float d = 0f; d < total - 3f; d += TrailSpacing)
-        {
-            Collider trunk = NearestTrunk(PointAlong(route, d), TrailReach, used);
-            if (trunk == null) continue;
-            used.Add(trunk);
-
-            // A band round the trunk, parented to the tree so it follows the lean.
-            Prim(trunk.transform.parent, "PaintMark", PrimitiveType.Cylinder, new Vector3(0f, 1.5f, 0f),
-                 new Vector3(0.34f, 0.06f, 0.34f), paint, default(Vector3), false);
-            marks++;
+            foot.gameObject.AddComponent<UVRevealed>();
         }
 
-        if (marks < 3) Debug.LogWarning("Only " + marks + " trees found along Tom's trail; the way to the camp is barely marked.");
+        // --- the mark at the end of the trail -------------------------------
+        Transform circle = Group(root, "UVCircle");
+        circle.localPosition = new Vector3(0f, 0.02f, circleAt);
 
-        Vector3 Flat(Vector3 v) { return new Vector3(v.x, 0f, v.z); }
-    }
-
-    static Vector3 PointAlong(Vector3[] route, float distance)
-    {
-        for (int i = 1; i < route.Length; i++)
+        Transform ring = Group(circle, "Ring");
+        const int segments = 40;
+        for (int i = 0; i < segments; i++)
         {
-            float len = Vector3.Distance(route[i - 1], route[i]);
-            if (distance <= len) return Vector3.Lerp(route[i - 1], route[i], len <= 0f ? 0f : distance / len);
-            distance -= len;
+            float a = i / (float)segments * Mathf.PI * 2f;
+            Prim(ring, "Arc_" + i, PrimitiveType.Cube,
+                 new Vector3(Mathf.Cos(a) * 1.5f, 0f, Mathf.Sin(a) * 1.5f),
+                 new Vector3(0.10f, 0.012f, 0.26f), paint,
+                 new Vector3(0f, -a * Mathf.Rad2Deg, 0f), false);
         }
-        return route[route.Length - 1];
-    }
 
-    /// <summary>The tree trunk nearest a point on the ground, within reach, skipping any already used.</summary>
-    static Collider NearestTrunk(Vector3 near, float reach, HashSet<Collider> used)
-    {
-        Collider best = null;
-        float bestSqr = reach * reach;
+        // A cross through the middle, so the circle has a centre to stand on.
+        Prim(ring, "Bar_A", PrimitiveType.Cube, Vector3.zero, new Vector3(2.0f, 0.012f, 0.09f), paint, default(Vector3), false);
+        Prim(ring, "Bar_B", PrimitiveType.Cube, Vector3.zero, new Vector3(0.09f, 0.012f, 2.0f), paint, default(Vector3), false);
 
-        foreach (Collider c in Physics.OverlapSphere(new Vector3(near.x, GroundTop + 1.2f, near.z), reach))
-        {
-            if (c.name != "Trunk" && c.name != "Snag") continue;
-            if (used != null && used.Contains(c)) continue;
+        circle.gameObject.AddComponent<UVRevealed>();
 
-            Vector3 d = c.bounds.center - near;
-            d.y = 0f;
-            if (d.sqrMagnitude < bestSqr)
-            {
-                bestSqr = d.sqrMagnitude;
-                best = c;
-            }
-        }
-        return best;
-    }
+        // The powder left behind afterwards, so the place still reads without the flashlight.
+        Transform dust = Group(circle, "Dusting");
+        Renderer[] dusting = new Renderer[1];
+        dusting[0] = Prim(dust, "Dust", PrimitiveType.Cylinder, Vector3.zero,
+                          new Vector3(3.2f, 0.008f, 3.2f), paint, default(Vector3), false).GetComponent<Renderer>();
 
-    /// <summary>Two painted strokes on the side of a trunk that faces <paramref name="toward"/>.</summary>
-    static void PaintCross(Transform parent, Collider trunk, Vector3 toward)
-    {
-        Vector3 centre = trunk.bounds.center;
-        Vector3 facing = toward - centre;
-        facing.y = 0f;
-        facing.Normalize();
+        // The circle needs a collider so a pour of powder can FIND it -- it is never aimed at
+        // or prompted, because a circle that announced itself would give the door away to
+        // anyone who walked past without a UV flashlight.
+        //
+        // A TRIGGER, not a solid: a solid box here would be an invisible wall in the middle of
+        // the woods, and the powder's overlap search passes QueryTriggerInteraction.Collide.
+        GameObject aim = new GameObject("Circle_Volume");
+        aim.transform.SetParent(circle, false);
+        aim.transform.localPosition = new Vector3(0f, 0.6f, 0f);
+        BoxCollider aimBox = aim.AddComponent<BoxCollider>();
+        aimBox.size = new Vector3(3.0f, 1.2f, 3.0f);
+        aimBox.isTrigger = true;
 
-        // Onto the bark itself, so a leaning trunk still gets its X on the surface.
-        Vector3 probe = new Vector3(centre.x, GroundTop + 1.45f, centre.z) + facing;
-        Vector3 surface = trunk.ClosestPoint(probe) + facing * 0.012f;
-        Quaternion flat = Quaternion.LookRotation(-facing);
+        RevealCircle reveal = circle.gameObject.AddComponent<RevealCircle>();
+        reveal.dusting = dusting;
 
-        for (int i = 0; i < 2; i++)
-        {
-            GameObject stroke = Prim(parent, "Camp_PaintX" + i, PrimitiveType.Cube, Vector3.zero,
-                                     new Vector3(0.05f, 0.42f, 0.015f), paint, default(Vector3), false);
-            stroke.transform.position = surface;
-            stroke.transform.rotation = flat * Quaternion.Euler(0f, 0f, i == 0 ? 35f : -35f);
-        }
+        // --- the door itself ------------------------------------------------
+        Transform doorRoot = Group(root, "Level2Door");
+        doorRoot.localPosition = new Vector3(0f, 0f, doorAt);
+
+        // A stone frame standing in the trees, with nothing behind it.
+        Box(doorRoot, "Jamb_W", -1.35f, -0.95f, 0f, 2.75f, -0.25f, 0.25f, rockMat);
+        Box(doorRoot, "Jamb_E", 0.95f, 1.35f, 0f, 2.75f, -0.25f, 0.25f, rockMat);
+        Box(doorRoot, "Lintel", -1.35f, 1.35f, 2.75f, 3.15f, -0.25f, 0.25f, rockMat);
+
+        Transform hinge = Group(doorRoot, "Door_Hinge");
+        hinge.localPosition = new Vector3(-0.95f, 0f, 0f);
+        Box(hinge, "Door_Leaf", 0.02f, 1.92f, 0.04f, 2.72f, -0.07f, 0.07f, wood);
+        Box(hinge, "Door_Lock", 1.60f, 1.86f, 1.15f, 1.45f, -0.10f, 0.10f, metalPale);
+
+        Level2Door door = doorRoot.gameObject.AddComponent<Level2Door>();
+        door.hinge = hinge;
+        reveal.door = door;
+
+        Level2Site site = root.gameObject.AddComponent<Level2Site>();
+        site.door = door;
     }
 
     /// <summary>
@@ -1314,6 +1433,11 @@ public static class PrototypeEnvironmentBuilder
             if (depth == null) depth = Undo.AddComponent<NightDepth>(eye.gameObject);
             Undo.RecordObject(depth, "Wire NightDepth");
             depth.centre = generator.transform;
+
+            // The gradient has to stretch with the map or the whole world past 45 m reads
+            // as one flat black. Clear out to the near woods, fully deep by the mid band.
+            depth.clearRadius = 22f;
+            depth.deepRadius = 85f;
         }
         else
         {
@@ -1342,28 +1466,89 @@ public static class PrototypeEnvironmentBuilder
 
             // Read from the generator's own radius, never hardcoded, so it cannot drift.
             if (gen != null) TrampledRing(props.transform, generator.transform.position, gen.protectionRadius);
+
+            // The UV trail and the door it leads to. Built last, so Level2Site's ground
+            // probe at run time has every trunk and rock in the level to sample against.
+            BuildLevel2Site(props.transform);
         }
 
-        // --- Tom's camp: where the case is put out when the level starts ----------
+        // --- the key: where its four pieces may hide, measured from the generator --------
         Expedition expedition = systems.GetComponent<Expedition>();
         if (expedition != null)
         {
             Undo.RecordObject(expedition, "Wire Expedition");
-            expedition.campPoint = campPoint;
+
+            // Fragments are kept out of the safe radius the same way loot depth is measured:
+            // from the generator, never from the house's transform.
+            expedition.depthCentre = generator.transform;
         }
         else
         {
-            Debug.LogWarning("No Expedition on Systems: Tom's case will never appear, so Level 1 cannot be finished.");
+            Debug.LogWarning("No Expedition on Systems: no key fragments will appear, so Level 1 cannot be finished.");
         }
 
-        // --- loot: deep means far from the generator, and the guaranteed Large piece
-        // turns up near Tom's camp, so the prize and the case compete for the same trip.
+        // --- the key maker: how many fragments it wants, and what it makes --------
+        KeyMaker maker = Object.FindAnyObjectByType<KeyMaker>();
+        if (maker != null)
+        {
+            Undo.RecordObject(maker, "Wire KeyMaker");
+
+            // Read from the Expedition rather than authored twice, so changing how many
+            // fragments the level hides cannot leave the device asking for the wrong number.
+            if (expedition != null) maker.fragmentsNeeded = expedition.fragmentsInLevel;
+
+            maker.keyPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(ObjectivePrefabDir + "/CompleteKey.prefab");
+            if (maker.keyPrefab == null)
+            {
+                Debug.LogWarning("No CompleteKey prefab at " + ObjectivePrefabDir +
+                                 "; the key maker will consume the fragments and produce nothing.");
+            }
+        }
+
+        // --- the door at the end of the UV trail ----------------------------------
+        Level2Door level2 = Object.FindAnyObjectByType<Level2Door>();
+        if (level2 != null)
+        {
+            Undo.RecordObject(level2, "Wire Level2Door");
+            level2.expedition = expedition;
+        }
+
+        // --- the corner of the map you need a flashlight for ----------------------
+        // On Systems, because which corner is dark is one roll shared by everyone, and it is
+        // drawn away from whichever corner the UV trail runs into.
+        DarkQuarter dark = systems.GetComponent<DarkQuarter>();
+        if (dark == null) dark = Undo.AddComponent<DarkQuarter>(systems);
+        Undo.RecordObject(dark, "Wire DarkQuarter");
+        dark.centre = generator.transform;
+        dark.avoid = level2 != null ? level2.transform : null;
+
+        // The four quarters meet where the ground is centred, and the gizmo is drawn to its edge.
+        dark.mapCentre = Vector3.zero;
+        dark.mapHalf = GroundHalf;
+
+        // It stops exactly where the generator's protection does, and is at full strength by
+        // 35 m. Measured from edit-mode renders, the woods past about 55 m are already
+        // near-black, so a darkening that only bit out there would be invisible -- the band
+        // that still reads by moonlight is the one worth taking away.
+        dark.innerRadius = 22f;
+        dark.fullRadius = 35f;
+
+        // --- loot: deep means far from the generator -----------------------------
         LootSpawner loot = systems.GetComponent<LootSpawner>();
         if (loot != null)
         {
             Undo.RecordObject(loot, "Wire LootSpawner depth");
             loot.depthCentre = generator.transform;
-            loot.focus = campPoint;
+
+            // There is no fixed place of interest to draw the Large piece towards any more,
+            // so it goes wherever depth sends it.
+            loot.focus = null;
+
+            // Depth has to be measured against the map it is on: at the old 18/45 every
+            // landmark past the near woods counted as equally deep, which would have paid
+            // the same for a walk to the garage as for a walk to the far house.
+            loot.shallowRadius = 22f;
+            loot.deepRadius = 90f;
         }
 
         MonsterSpawner spawner = systems.GetComponent<MonsterSpawner>();
@@ -1371,7 +1556,7 @@ public static class PrototypeEnvironmentBuilder
         {
             Undo.RecordObject(spawner, "Retune MonsterSpawner");
             spawner.areaCenter = Vector3.zero;          // the house is the centre now
-            spawner.areaRadius = 42f;                   // inside the treeline, off the boundary
+            spawner.areaRadius = 88f;                   // inside the treeline, off the boundary
             spawner.minDistanceFromPlayer = 26f;
         }
 

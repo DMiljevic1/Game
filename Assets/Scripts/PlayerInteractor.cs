@@ -60,6 +60,10 @@ public class PlayerInteractor : MonoBehaviour
              "interactable, so a new one is audible the day it is written.")]
     public float interactNoiseRadius = 12f;
 
+    [Tooltip("The body the handling sound comes from, so crouching muffles it exactly as it " +
+             "muffles a footstep. Found on this object if left empty.")]
+    public NoiseEmitter noiseEmitter;
+
     private readonly List<InteractionOption> options = new List<InteractionOption>();
     private readonly List<InteractionOption> heldOptions = new List<InteractionOption>();
 
@@ -119,6 +123,7 @@ public class PlayerInteractor : MonoBehaviour
         {
             Debug.LogError("PlayerInteractor on " + name + " has no PlayerMovement; heavy items will not slow the player.", this);
         }
+        if (noiseEmitter == null) noiseEmitter = GetComponent<NoiseEmitter>();
         if (viewCamera == null) viewCamera = GetComponentInChildren<Camera>();
         if (viewCamera == null)
         {
@@ -148,14 +153,16 @@ public class PlayerInteractor : MonoBehaviour
                     // Handling anything is audible. Emitted here, once, for every
                     // interactable there will ever be -- so nothing can forget to.
                     // Keys routed to a HELD item are deliberately silent: flicking a
-                    // torch switch must not give you away.
-                    Noise.Emit(transform.position, interactNoiseRadius, gameObject);
+                    // flashlight switch must not give you away. Through the body's emitter, so
+                    // a crouched player handles things as silently as they walk.
+                    if (noiseEmitter != null) noiseEmitter.Emit(interactNoiseRadius);
+                    else Noise.Emit(transform.position, interactNoiseRadius, gameObject);
                     break;
                 }
             }
         }
 
-        // What is in the hands gets keys too: you switch a torch on without looking
+        // What is in the hands gets keys too: you switch a flashlight on without looking
         // at it. Its colliders are off while held, so it can never be the aimed
         // target as well - and if it shares a key with what you are aiming at, the
         // target wins, so one press can never fire two actions.
@@ -304,7 +311,7 @@ public class PlayerInteractor : MonoBehaviour
     /// <summary>
     /// The point on a collider nearest the view ray, measured at the object's own
     /// depth. This is what makes the tolerance scale with size: a door is forgiving
-    /// across its whole face, while a dropped torch still gets a real area to aim
+    /// across its whole face, while a dropped flashlight still gets a real area to aim
     /// at rather than a single point.
     /// </summary>
     private static Vector3 AimPointOn(Collider col, Vector3 origin, Vector3 forward)
@@ -439,11 +446,35 @@ public class PlayerInteractor : MonoBehaviour
     /// </summary>
     private void DropCarriedOnDeath()
     {
-        if (carried == null) return;   // empty-handed death changes nothing
+        if (carried == null) return;   // empty-handed death changes nothing, and so does a body that took it
 
         // Use the recorded death position, the same spot Revival leaves the body on.
         Vector3 where = vitals != null ? vitals.LastDeathPosition : transform.position;
         DropCarriedAt(where, transform.rotation);
+    }
+
+    /// <summary>
+    /// Everything this player owns, out of their hands and out of their pack, without any
+    /// of it being placed in the world or destroyed. Called once per death, by
+    /// <see cref="Revival"/>, so the whole lot ends up on the body rather than in a heap
+    /// on the floor -- which is what lets a teammate carry a friend's kit home with them.
+    ///
+    /// It runs before <see cref="DropCarriedOnDeath"/> (see the event order in
+    /// PlayerVitals.Die), so the hand item leaves by this route and the old ground drop is
+    /// left as the fallback for a level with no Revival in it.
+    /// </summary>
+    public void ReleaseBelongings(List<Carryable> into)
+    {
+        if (into == null) return;
+
+        if (carried != null)
+        {
+            Carryable item = carried;
+            ConsumeCarried();          // out of the hands without being placed; clears the carry load
+            into.Add(item);
+        }
+
+        if (inventory != null) inventory.ReleaseAll(into);
     }
 
     /// <summary>
@@ -505,9 +536,9 @@ public class PlayerInteractor : MonoBehaviour
             // Whatever the held item can do is listed beside it, so its key is never
             // something the player has to already know.
             // Say when the item is what is slowing you down, or being slow reads as a bug.
-            string weight = carried.IsHeavy
-                ? (carried.allowSprintWhileCarried ? "  (heavy)" : "  (too heavy to run)")
-                : "";
+            string weight = !carried.IsHeavy ? ""
+                : carried.heavyLoad ? "  (too heavy to run or jump)"
+                : carried.allowSprintWhileCarried ? "  (heavy)" : "  (too heavy to run)";
 
             string line = "Carrying: " + carried.itemName + weight + "   [" + dropKey + "] drop";
             for (int i = 0; i < heldOptions.Count; i++)

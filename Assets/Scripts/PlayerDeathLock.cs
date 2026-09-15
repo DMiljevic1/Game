@@ -109,7 +109,8 @@ public class PlayerDeathLock : MonoBehaviour
         Hud.Label(new Rect(0f, Screen.height * 0.36f, Screen.width, Hud.Prompt.fontSize * 1.8f),
                   "YOU DIED", Hud.Prompt, titleColor);
         Hud.Label(new Rect(0f, Screen.height * 0.36f + Hud.Prompt.fontSize * 1.8f, Screen.width, Hud.LineHeight),
-                  "Your body lies where you fell. A teammate can carry it home and revive it with adrenaline.",
+                  "Your body and everything you carried lie where you fell. A teammate can revive you here " +
+                  "with adrenaline - slow and very loud - or carry you home and do it safely.",
                   Hud.Centered, new Color(1f, 1f, 1f, 0.8f));
     }
 }

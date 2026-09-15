@@ -3,8 +3,15 @@ using UnityEngine;
 /// <summary>
 /// Makes the woods darker the further this camera is from the house. Two dials, because
 /// they do different jobs: less ambient makes what is near you darker, and thicker fog
-/// shortens how far you can see. Only the first leaves the torch's reach alone, so most of
+/// shortens how far you can see. Only the first leaves the flashlight's reach alone, so most of
 /// the darkening is ambient and the fog just closes the distance in.
+///
+/// One corner of the map is darker still: NightDepth asks <see cref="DarkQuarter"/> how much
+/// of it is in force where the camera stands and folds that in. There it takes a third dial
+/// as well -- the moon itself -- because ambient only empties the shadows while the moon goes
+/// on picking out every surface facing it, and scaling ambient alone left that corner
+/// perfectly readable. The quarter owns where it is and how dark it goes; this stays the only
+/// thing in the game that writes ambient, fog or the moon's intensity.
 ///
 /// TimeOfDay owns the night's base ambient; this writes that base, scaled for where the
 /// camera stands, every LateUpdate, so it can never compound. It only changes how this
@@ -22,13 +29,13 @@ public class NightDepth : MonoBehaviour
     public float deepRadius = 45f;
 
     [Header("Ambient")]
-    [Tooltip("Fraction of the night ambient left in the deep forest. The torch is what makes up the difference.")]
+    [Tooltip("Fraction of the night ambient left in the deep forest. The flashlight is what makes up the difference.")]
     [Range(0f, 1f)] public float deepAmbient = 0.3f;
 
     [Header("Fog")]
     [Tooltip("Fog around the house. Thinner than the level's authored fog, so the yard and the treeline read by moonlight.")]
     public float clearDensity = 0.022f;
-    [Tooltip("Fog in the deep forest. Keep it modest: fog dims the torch beam as much as the moonlight.")]
+    [Tooltip("Fog in the deep forest. Keep it modest: fog dims the flashlight beam as much as the moonlight.")]
     public float deepDensity = 0.055f;
 
     private float levelDensity;
@@ -64,12 +71,32 @@ public class NightDepth : MonoBehaviour
         // Smoothstep, so walking into the trees is a gradual closing-in rather than a band.
         depth = depth * depth * (3f - 2f * depth);
 
-        RenderSettings.fogDensity = Mathf.Lerp(clearDensity, deepDensity, depth);
+        float density = Mathf.Lerp(clearDensity, deepDensity, depth);
+        float ambient = Mathf.Lerp(1f, deepAmbient, depth);
+
+        // The dark quarter multiplies what the distance gradient has already left, so it reads
+        // as this part of the woods being worse rather than as a second gradient of its own.
+        float moon = 1f;
+
+        DarkQuarter dark = DarkQuarter.Instance;
+        if (dark != null)
+        {
+            float weight = dark.Weight(transform.position);
+            ambient *= Mathf.Lerp(1f, dark.ambientScale, weight);
+            density *= Mathf.Lerp(1f, dark.fogScale, weight);
+            moon = Mathf.Lerp(1f, dark.moonScale, weight);
+        }
+
+        RenderSettings.fogDensity = density;
 
         TimeOfDay clock = TimeOfDay.Instance;
         if (clock == null) return;
 
-        float ambient = Mathf.Lerp(1f, deepAmbient, depth);
+        // The moon is written as the night's own intensity times the factor, never as a
+        // multiple of what is already on the light -- the same never-compound rule the ambient
+        // below follows. It is a per-viewer visual like the rest of this script: every client
+        // lights its own scene, and nothing in the simulation reads a light's intensity.
+        if (clock.sun != null) clock.sun.intensity = clock.nightIntensity * moon;
         RenderSettings.ambientSkyColor = clock.AmbientSky * ambient;
         RenderSettings.ambientEquatorColor = clock.AmbientEquator * ambient;
         RenderSettings.ambientGroundColor = clock.AmbientGround * ambient;

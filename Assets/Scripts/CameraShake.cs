@@ -11,6 +11,10 @@ using UnityEngine;
 /// MouseLook rewrites localRotation every Update, so the roll is re-applied in LateUpdate
 /// and the previous frame's roll is removed first — it can never accumulate, even if
 /// MouseLook is switched off.
+///
+/// The positional sway is relative in the same way: last frame's offset is taken off and
+/// the new one added, so something else moving the camera (crouching lowers it) is
+/// carried along instead of being snapped back to where the camera started.
 /// </summary>
 [DisallowMultipleComponent]
 public class CameraShake : MonoBehaviour
@@ -24,7 +28,7 @@ public class CameraShake : MonoBehaviour
     [Tooltip("Wobbles per second. Higher is a sharper rattle, lower is a lurch.")]
     public float frequency = 22f;
 
-    private Vector3 basePosition;
+    private Vector3 appliedOffset;
     private Quaternion appliedRoll = Quaternion.identity;
 
     private float duration;
@@ -36,7 +40,6 @@ public class CameraShake : MonoBehaviour
 
     void Awake()
     {
-        basePosition = transform.localPosition;
         seed = Random.value * 100f;
     }
 
@@ -44,7 +47,8 @@ public class CameraShake : MonoBehaviour
     {
         // Never leave the camera parked off-centre or tilted.
         timeLeft = 0f;
-        transform.localPosition = basePosition;
+        transform.localPosition -= appliedOffset;
+        appliedOffset = Vector3.zero;
         transform.localRotation = transform.localRotation * Quaternion.Inverse(appliedRoll);
         appliedRoll = Quaternion.identity;
     }
@@ -77,10 +81,11 @@ public class CameraShake : MonoBehaviour
 
         if (timeLeft <= 0f)
         {
-            if (appliedRoll != Quaternion.identity)
+            if (appliedRoll != Quaternion.identity || appliedOffset != Vector3.zero)
             {
-                transform.localPosition = basePosition;
+                transform.localPosition -= appliedOffset;
                 transform.localRotation = look;
+                appliedOffset = Vector3.zero;
                 appliedRoll = Quaternion.identity;
             }
             return;
@@ -101,7 +106,9 @@ public class CameraShake : MonoBehaviour
         // tilts the view further too and the two stay in proportion.
         float rollScale = defaultAmplitude <= 0.0001f ? 1f : strength / defaultAmplitude;
         appliedRoll = Quaternion.Euler(0f, 0f, z * rollDegrees * rollScale);
-        transform.localPosition = basePosition + new Vector3(x, y, 0f) * strength;
+        Vector3 offset = new Vector3(x, y, 0f) * strength;
+        transform.localPosition += offset - appliedOffset;
+        appliedOffset = offset;
         transform.localRotation = look * appliedRoll;
     }
 

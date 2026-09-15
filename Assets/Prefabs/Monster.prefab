@@ -75,7 +75,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Monster
   hearingRadius: 30
   hearingSensitivity: 1
-  positionError: 3
+  positionError: 5
+  referenceNoiseRadius: 8
+  noiseWeightExponent: 1.5
+  maxNoiseWeight: 3
+  retargetCooldown: 0.4
   patrolSpeed: 1.6
   alertSpeed: 2.6
   chaseSpeed: 4
@@ -87,14 +91,19 @@ MonoBehaviour:
   patrolSecondsPerMetre: 1.6
   roamCenter: {x: 0, y: 0, z: 0}
   roamRadius: 45
-  investigateDuration: 6
+  investigateDuration: 3
+  minSearchPoints: 2
+  maxSearchPoints: 4
+  searchRadius: 10
+  searchInterestTime: 38
+  searchInterestRadius: 18
   scanTurnSpeed: 70
   scanHoldTime: 0.9
   scanSweepAngle: 110
   agitationPerSound: 1
   agitationDecayPerSecond: 0.45
-  chaseThreshold: 2.5
-  maxAgitation: 5
+  chaseThreshold: 4
+  maxAgitation: 6
   attackRange: 1.7
   attackDamage: 25
   attackInterval: 1.2
@@ -124,6 +133,7 @@ MonoBehaviour:
   pauseChance: 0.3
   minPauseTime: 0.4
   maxPauseTime: 2.2
+  minSearchStep: 3
   anchors: []
   anchorChance: 0.25
   showDebug: 1

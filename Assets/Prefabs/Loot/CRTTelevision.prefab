@@ -978,9 +978,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Valuable
   itemName: old CRT television
   pickUpKey: 102
-  carryMoveMultiplier: 0.62
+  carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 0
+  heavyLoad: 1
   canBeStoredInInventory: 0
   heldPosition: {x: 0.1, y: -0.3, z: 0.62}
   heldEuler: {x: 2.73, y: 19.82, z: 352.48}

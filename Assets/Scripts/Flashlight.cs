@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// A torch the player picks up like any other Carryable and switches with its own
+/// A flashlight the player picks up like any other Carryable and switches with its own
 /// key while holding it.
 ///
 /// It reads no input itself: PlayerInteractor routes the key, exactly as it does
@@ -16,7 +16,7 @@ using UnityEngine;
 public class Flashlight : Carryable
 {
     [Header("Switch")]
-    [Tooltip("Pressed while the torch is in the player's hands.")]
+    [Tooltip("Pressed while the flashlight is in the player's hands.")]
     public KeyCode toggleKey = KeyCode.X;
     public bool isOn = false;
 
@@ -34,7 +34,7 @@ public class Flashlight : Carryable
     {
         base.Awake();
 
-        if (string.IsNullOrEmpty(itemName) || itemName == "Item") itemName = "torch";
+        if (string.IsNullOrEmpty(itemName) || itemName == "Item") itemName = "flashlight";
         if (beam == null)
         {
             Debug.LogError("Flashlight " + name + " has no beam light assigned; it will never light anything.", this);
@@ -45,7 +45,7 @@ public class Flashlight : Carryable
     public override void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
         // In the hands the only thing to do is switch it; on the floor, pick it up.
-        if (IsHeld) options.Add(new InteractionOption(toggleKey, isOn ? "Switch off torch" : "Switch on torch"));
+        if (IsHeld) options.Add(new InteractionOption(toggleKey, isOn ? "Switch off flashlight" : "Switch on flashlight"));
         else base.GetOptions(interactor, options);
     }
 
@@ -68,7 +68,7 @@ public class Flashlight : Carryable
         OnToggled(isOn);
     }
 
-    // Dropping a lit torch leaves it lit on the ground: a light you can put down
+    // Dropping a lit flashlight leaves it lit on the ground: a light you can put down
     // is worth more than one that politely switches itself off.
     private void ApplyState()
     {

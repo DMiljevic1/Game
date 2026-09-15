@@ -153,6 +153,17 @@ public class Store : MonoBehaviour, IInteractable
     /// <summary>True while the panel is up. The HUD draws only then.</summary>
     public bool IsOpen { get { return browser != null; } }
 
+    // The one open panel in the level, or null. A scene registry like Generator's -- not
+    // shared game state, so it stays netcode-safe.
+    private static Store openPanel;
+
+    /// <summary>
+    /// True while any store panel is up. The store is the only place in the game where the
+    /// mouse means something other than the world, so anything that binds a mouse button --
+    /// MagicPowder's pour -- has to stand down while a player is clicking Buy buttons.
+    /// </summary>
+    public static bool IsAnyOpen { get { return openPanel != null && openPanel.IsOpen; } }
+
     /// <summary>Who is browsing, or null. The HUD needs it to ask what they can carry.</summary>
     public PlayerInteractor Browser { get { return browser; } }
 
@@ -245,6 +256,7 @@ public class Store : MonoBehaviour, IInteractable
         if (interactor == null || IsOpen) return;
 
         browser = interactor;
+        openPanel = this;
 
         suspendedLook = interactor.viewCamera != null ? interactor.viewCamera.GetComponent<MouseLook>() : null;
         if (suspendedLook != null && !suspendedLook.enabled) suspendedLook = null;   // already off: not ours to turn on
@@ -274,6 +286,7 @@ public class Store : MonoBehaviour, IInteractable
         suspendedLook = null;
         suspendedMovement = null;
         browser = null;
+        if (openPanel == this) openPanel = null;
     }
 
     // ------------------------------------------------------------- buying

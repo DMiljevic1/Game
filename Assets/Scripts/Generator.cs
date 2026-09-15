@@ -85,11 +85,23 @@ public class Generator : MonoBehaviour, IInteractable
     /// </summary>
     public static bool IsInsideAnyRadius(Vector3 point)
     {
+        return IsInsideAnyRadius(point, 0f);
+    }
+
+    /// <summary>
+    /// The same question with the radius widened by <paramref name="margin"/>. For things that
+    /// want a little clearance outside the light -- loot that should not be found standing
+    /// right against its edge -- rather than a second radius of their own to keep in step.
+    /// </summary>
+    public static bool IsInsideAnyRadius(Vector3 point, float margin)
+    {
         for (int i = 0; i < active.Count; i++)
         {
             Generator g = active[i];
             if (g == null) continue;
-            if ((point - g.transform.position).sqrMagnitude <= g.protectionRadius * g.protectionRadius)
+
+            float reach = g.protectionRadius + margin;
+            if ((point - g.transform.position).sqrMagnitude <= reach * reach)
                 return true;
         }
         return false;

@@ -36,23 +36,14 @@ public static class LootSpawnPointBuilder
     const int   YardCap = 28;
 
     const float FieldInner = 20f;
-    const float FieldOuter = 34f;
-    const int   FieldTries = 320;
-    const int   FieldCap = 24;
+    const float FieldOuter = 45f;
+    const int   FieldTries = 420;
+    const int   FieldCap = 26;
 
-    const float DeepInner = 34f;        // the woods proper, out where Tom's camp is
-    const float DeepOuter = 46f;
-    const int   DeepTries = 380;
-    const int   DeepCap = 24;
-
-    // A few spots round Tom's camp, so the Large piece LootSpawner puts beside it always has
-    // somewhere to stand: the woods there are dense, and the Deep ring alone left two.
-    const string CampPath = "Props/TomsCamp";   // built by PrototypeEnvironmentBuilder.BuildTomsCamp
-    const float CampInner = 3.5f;       // clear of the case itself
-    const float CampOuter = 14f;
-    const int   CampTries = 220;
-    const int   CampCap = 10;
-
+    const float DeepInner = 45f;        // the mid woods: past here you are committed
+    const float DeepOuter = 95f;
+    const int   DeepTries = 700;
+    const int   DeepCap = 34;
     const float PointSpacing = 2.0f;    // no two markers closer than this
 
     // Each region gets its own budget rather than sharing one pool. A single global cap
@@ -112,31 +103,20 @@ public static class LootSpawnPointBuilder
         int field = AddRing(spawner, root.transform, accepted, Vector3.zero, FieldInner, FieldOuter, FieldTries, FieldCap, "Field");
         int deep = AddRing(spawner, root.transform, accepted, Vector3.zero, DeepInner, DeepOuter, DeepTries, DeepCap, "Deep");
 
-        int camp = 0;
-        GameObject campRoot = GameObject.Find(CampPath);
-        if (campRoot != null)
-        {
-            Vector3 c = campRoot.transform.position;
-            camp = AddRing(spawner, root.transform, accepted, new Vector3(c.x, 0f, c.z), CampInner, CampOuter, CampTries, CampCap, "Camp");
-        }
-        else
-        {
-            Debug.LogWarning("No " + CampPath + " in the scene; the Large piece may have nowhere to stand by Tom's camp.");
-        }
 
         Random.state = restore;
 
         if (temporary != null) Object.DestroyImmediate(temporary);
 
-        int total = indoor + yard + field + deep + camp;
+        int total = indoor + yard + field + deep;
         if (total == 0)
         {
             Debug.LogError("No valid loot spawn points were found at all -- is the environment built?");
             return;
         }
 
-        Debug.Log(string.Format("Loot spawn points rebuilt: {0} total ({1} house, {2} yard, {3} field, {4} deep, {5} by the camp).",
-                                total, indoor, yard, field, deep, camp));
+        Debug.Log(string.Format("Loot spawn points rebuilt: {0} total ({1} house, {2} yard, {3} field, {4} deep).",
+                                total, indoor, yard, field, deep));
     }
 
     // ------------------------------------------------------------------- regions

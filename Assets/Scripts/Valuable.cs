@@ -72,6 +72,7 @@ public class Valuable : Carryable
                 carryMoveMultiplier = 1f;
                 carrySprintMultiplier = 1f;
                 allowSprintWhileCarried = true;
+                heavyLoad = false;
                 canBeStoredInInventory = true;
                 break;
 
@@ -79,6 +80,7 @@ public class Valuable : Carryable
                 carryMoveMultiplier = 0.9f;
                 carrySprintMultiplier = 0.9f;
                 allowSprintWhileCarried = true;
+                heavyLoad = false;
                 canBeStoredInInventory = true;
                 break;
 

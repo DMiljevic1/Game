@@ -118,8 +118,12 @@ public class PlayerVitals : MonoBehaviour
         lastDeathPosition = transform.position;
         lastDeathYaw = transform.eulerAngles.y;
 
-        OnDied();
+        // Run-level systems first, per-player systems second. Revival leaves the body on
+        // AnyDied and takes the dead player's belongings onto it, so the interactor's own
+        // death drop then finds nothing left in the hands. With no Revival, or no body
+        // prefab, that drop still runs -- which is exactly the behaviour that came before.
         AnyDied(this);
+        OnDied();
     }
 
     /// <summary>

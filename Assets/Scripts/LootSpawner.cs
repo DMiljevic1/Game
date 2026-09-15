@@ -12,7 +12,8 @@ using UnityEngine;
 ///
 /// WHERE you find it is a shuffle of the LootSpawnPoints in the scene, each re-probed
 /// against real geometry, so nothing is ever left inside a wall or under the floor and
-/// no two pieces land on top of each other.
+/// no two pieces land on top of each other. Never inside the base, either: every piece
+/// worth money is a trip outside the light (see IsInBase).
 ///
 /// Co-op note: the roll is authority-only, like MonsterSpawner. Clients will receive the
 /// spawned items through netcode rather than rolling their own table -- which is exactly
@@ -85,6 +86,15 @@ public class LootSpawner : MonoBehaviour
              "price (the old behaviour); 1 = strictly, the dearest always furthest out. Rarity is " +
              "untouched either way: the same items and the same spots are chosen, only the pairing moves.")]
     [Range(0f, 1f)] public float depthBias = 0.75f;
+
+    [Header("The base")]
+    [Tooltip("Nothing is placed inside the base, so every piece of loot is a trip out of the " +
+             "light. Clear it only to go back to loot lying about the house.")]
+    public bool keepOutOfBase = true;
+
+    [Tooltip("Extra metres outside the generator's radius that still count as the base, so a " +
+             "piece is never found standing right against the edge of the light.")]
+    public float baseMargin = 0f;
 
     [Header("Placement")]
     [Tooltip("Nothing spawns this close to another piece of loot, so two items are never " +
@@ -187,6 +197,8 @@ public class LootSpawner : MonoBehaviour
             LootSpawnPoint point = shuffled[i];
             if (point == null) continue;
 
+            if (IsInBase(point.transform.position)) continue;
+
             Vector3 surface;
             if (!TryResolveSurface(point.transform.position, out surface)) continue;
             if (IsTooCloseToTakenSpot(surface)) continue;
@@ -208,7 +220,8 @@ public class LootSpawner : MonoBehaviour
         if (draws.Count < wanted)
         {
             Debug.LogWarning("LootSpawner placed " + draws.Count + " of " + wanted + " items: not enough " +
-                             "valid spawn points. Run Lab > Loot > Rebuild Loot Spawn Points.", this);
+                             "valid spawn points outside the base. Run Lab > Loot > Rebuild Loot " +
+                             "Spawn Points.", this);
         }
     }
 
@@ -265,6 +278,8 @@ public class LootSpawner : MonoBehaviour
         {
             LootSpawnPoint point = shuffled[i];
             if (point == null || !point.allowLargeItems) continue;
+
+            if (IsInBase(point.transform.position)) continue;
 
             Vector3 d = point.transform.position - focus.position;
             d.y = 0f;
@@ -539,7 +554,7 @@ public class LootSpawner : MonoBehaviour
             shuffled[j] = tmp;
         }
 
-        // Loot that is already in the level -- fuel cans, the torch -- counts as a taken
+        // Loot that is already in the level -- fuel cans, the flashlight -- counts as a taken
         // spot, so a run never stands a spawned item inside one of them.
         Carryable[] existing = FindObjectsByType<Carryable>();
         for (int i = 0; i < existing.Length; i++)
@@ -550,6 +565,25 @@ public class LootSpawner : MonoBehaviour
         // Tom's case is put out on the focus by Expedition, possibly after this runs, so its
         // spot is reserved here rather than found.
         if (focus != null) taken.Add(focus.position);
+    }
+
+    /// <summary>
+    /// The base is the ground the generator's light covers, running or not -- the same question
+    /// MonsterSpawner asks of its own spawn points, and for the same reason: it is about the
+    /// ground, not about whether anyone has switched it on yet. So nothing worth money is ever
+    /// lying about the house, and looting is always a trip out of the light.
+    ///
+    /// Asked of the generator rather than measured against a radius of our own, so retuning
+    /// Generator.protectionRadius moves the exclusion with it and the two cannot drift apart.
+    ///
+    /// Note the registry behind this is filled in OnEnable, which does not run in edit mode --
+    /// so this is a runtime rule only, and the spawn-point builder still puts markers in the
+    /// house. That is deliberate: a marker is not an item, and a point inside the base simply
+    /// goes unused.
+    /// </summary>
+    public bool IsInBase(Vector3 p)
+    {
+        return keepOutOfBase && Generator.IsInsideAnyRadius(p, baseMargin);
     }
 
     private bool IsTooCloseToTakenSpot(Vector3 p)

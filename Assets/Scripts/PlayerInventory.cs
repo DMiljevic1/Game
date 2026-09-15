@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -252,6 +253,27 @@ public class PlayerInventory : MonoBehaviour
         item.OnStowed();
         slots[slot] = item;
         ClearHandedOut();
+    }
+
+    /// <summary>
+    /// Hand every stowed item over to <paramref name="into"/> and leave the pack empty.
+    /// The items are not dropped, destroyed or woken up -- they stay exactly as they were
+    /// in their slots, so whoever receives them decides what happens next. Death is the
+    /// only caller: the pack goes onto the body with the rest of what you were carrying.
+    /// </summary>
+    public void ReleaseAll(List<Carryable> into)
+    {
+        if (into == null) return;
+
+        for (int i = 0; i < SlotCount; i++)
+        {
+            if (slots[i] == null) continue;
+            into.Add(slots[i]);
+            slots[i] = null;
+        }
+
+        ClearHandedOut();
+        OnChanged();
     }
 
     /// <summary>

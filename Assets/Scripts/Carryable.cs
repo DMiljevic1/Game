@@ -17,15 +17,23 @@ public struct CarryLoad
     /// <summary>False for something too bulky to run with.</summary>
     public readonly bool allowSprint;
 
-    public CarryLoad(float moveMultiplier, float sprintMultiplier, bool allowSprint)
+    /// <summary>
+    /// Hugged to the chest: walked at the carrier's own heavyWalkSpeed rather than a
+    /// multiplier, with no sprint and no jump. The speed lives on PlayerMovement so every
+    /// heavy thing is retuned in one Inspector field.
+    /// </summary>
+    public readonly bool heavy;
+
+    public CarryLoad(float moveMultiplier, float sprintMultiplier, bool allowSprint, bool heavy)
     {
         this.moveMultiplier = moveMultiplier;
         this.sprintMultiplier = sprintMultiplier;
         this.allowSprint = allowSprint;
+        this.heavy = heavy;
     }
 
     /// <summary>Empty hands: no penalty. This is what a drop, a sale or a death resets to.</summary>
-    public static CarryLoad None { get { return new CarryLoad(1f, 1f, true); } }
+    public static CarryLoad None { get { return new CarryLoad(1f, 1f, true, false); } }
 }
 
 /// <summary>
@@ -41,7 +49,8 @@ public class Carryable : MonoBehaviour, IInteractable
     public KeyCode pickUpKey = KeyCode.F;
 
     [Header("Weight")]
-    [Tooltip("Walking speed while this is held, as a fraction of normal. 1 = no penalty.")]
+    [Tooltip("Walking speed while this is held, as a fraction of normal. 1 = no penalty. " +
+             "Ignored for a heavy load, which walks at PlayerMovement.heavyWalkSpeed.")]
     [Range(0.2f, 1f)] public float carryMoveMultiplier = 1f;
 
     [Tooltip("Sprint speed while this is held, as a fraction of normal sprint.")]
@@ -49,6 +58,10 @@ public class Carryable : MonoBehaviour, IInteractable
 
     [Tooltip("Clear it for something too big to run with.")]
     public bool allowSprintWhileCarried = true;
+
+    [Tooltip("Hugged to the chest: walked at PlayerMovement.heavyWalkSpeed, with no sprint and no jump. " +
+             "Set by the Large preset; tick it by hand for anything else that heavy.")]
+    public bool heavyLoad = false;
 
     [Tooltip("Can this go on your back? Clear it for anything too big to shoulder -- a " +
              "television is carried in your hands or not at all, so it can never take up " +
@@ -79,13 +92,13 @@ public class Carryable : MonoBehaviour, IInteractable
     /// pick-up by the interactor -- nothing reads it per frame.</summary>
     public CarryLoad Load
     {
-        get { return new CarryLoad(carryMoveMultiplier, carrySprintMultiplier, allowSprintWhileCarried); }
+        get { return new CarryLoad(carryMoveMultiplier, carrySprintMultiplier, allowSprintWhileCarried, heavyLoad); }
     }
 
     /// <summary>True if holding this costs the player anything at all. Used for prompts.</summary>
     public bool IsHeavy
     {
-        get { return carryMoveMultiplier < 1f || carrySprintMultiplier < 1f || !allowSprintWhileCarried; }
+        get { return heavyLoad || carryMoveMultiplier < 1f || carrySprintMultiplier < 1f || !allowSprintWhileCarried; }
     }
 
     protected virtual void Awake()
@@ -100,19 +113,20 @@ public class Carryable : MonoBehaviour, IInteractable
     }
 
     /// <summary>
-    /// The "hugged to the chest" load: slower than a chasing monster, no running, never in
-    /// the pack. One copy, shared by Large loot and anything else that heavy (Tom's case),
-    /// so retuning it against the monster's chaseSpeed moves every one of them together.
+    /// The "hugged to the chest" load: slower than a chasing monster, no running, no jumping,
+    /// never in the pack. One copy, shared by Large loot and anything else that heavy (Tom's
+    /// case). The speed itself is PlayerMovement.heavyWalkSpeed, so retuning it against the
+    /// monster's chaseSpeed is one Inspector field on the Player and moves them all together.
     /// </summary>
     protected void ApplyLargeLoad()
     {
-        // Slow enough that the monster's 3.6 outpaces the 3.1 this leaves.
-        carryMoveMultiplier = 0.62f;
+        heavyLoad = true;
+        carryMoveMultiplier = 1f;        // unused: a heavy load walks at the carrier's heavyWalkSpeed
         carrySprintMultiplier = 1f;      // unused while sprinting is off
         allowSprintWhileCarried = false;
 
         // Too big to shoulder: a whole trip in your hands, never one of four things you
-        // grabbed on the way -- and no torch in hand while you carry it.
+        // grabbed on the way -- and no flashlight in hand while you carry it.
         canBeStoredInInventory = false;
     }
 
@@ -164,7 +178,7 @@ public class Carryable : MonoBehaviour, IInteractable
     /// <see cref="IsHeld"/> stays true because the item is still not in the world, so
     /// every existing "on the floor?" guard keeps meaning what it meant.
     ///
-    /// Deactivating is also why a stowed torch goes dark and lights again when you take
+    /// Deactivating is also why a stowed flashlight goes dark and lights again when you take
     /// it out. Override if an item should keep running inside the pack.
     /// </summary>
     public virtual void OnStowed()
