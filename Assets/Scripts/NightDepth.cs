@@ -13,6 +13,10 @@ using UnityEngine;
 /// perfectly readable. The quarter owns where it is and how dark it goes; this stays the only
 /// thing in the game that writes ambient, fog or the moon's intensity.
 ///
+/// Inside the mountain none of that is a gradient at all: <see cref="MountainInterior"/> is
+/// asked how far in the camera is and the answer takes the sky away entirely, because there
+/// is rock overhead and the flashlight is the only light in the place.
+///
 /// TimeOfDay owns the night's base ambient; this writes that base, scaled for where the
 /// camera stands, every LateUpdate, so it can never compound. It only changes how this
 /// camera sees the world — nothing in the simulation reads fog or ambient — so in co-op
@@ -85,6 +89,22 @@ public class NightDepth : MonoBehaviour
             ambient *= Mathf.Lerp(1f, dark.ambientScale, weight);
             density *= Mathf.Lerp(1f, dark.fogScale, weight);
             moon = Mathf.Lerp(1f, dark.moonScale, weight);
+        }
+
+        // Under rock, none of the above applies: there is no sky to be dark, so the cave is
+        // not another gradient on top of the woods but a switch to black. Its fog is written
+        // outright rather than scaled, because the beam is the only light in there and the
+        // distance gradient's fog would swallow it.
+        MountainInterior cave = MountainInterior.Instance;
+        if (cave != null)
+        {
+            float weight = cave.Weight(transform.position);
+            if (weight > 0f)
+            {
+                ambient *= Mathf.Lerp(1f, cave.ambientScale, weight);
+                moon *= Mathf.Lerp(1f, cave.moonScale, weight);
+                density = Mathf.Lerp(density, cave.fogDensity, weight);
+            }
         }
 
         RenderSettings.fogDensity = density;

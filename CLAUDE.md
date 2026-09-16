@@ -33,10 +33,10 @@ The `unity-mcp` tools drive the **live Editor**. That is the primary way to chan
 
 ## Scene conventions (SampleScene)
 
-- Roots: `Directional Light`, `Global Volume`, `Player` (CharacterController + `PlayerMovement`, child `Main Camera` + `MouseLook`), `Systems`, `Generator`, `FuelCans`, `PlayerRespawn`, `Ground`, `Boundary`, `House`, `Forest`, `Props`, `SellStation`, `Store`, `LootSpawnPoints`.
+- Roots: `Directional Light`, `Global Volume`, `Player` (CharacterController + `PlayerMovement`, child `Main Camera` + `MouseLook`), `Systems`, `Generator`, `FuelCans`, `PlayerRespawn`, `Ground`, `Boundary`, `House`, `Forest`, `Mountain`, `Props`, `SellStation`, `Store`, `LootSpawnPoints`.
 - **The environment is generated, not hand-placed.** `Assets/Editor/PrototypeEnvironmentBuilder.cs`
   (menu **Lab ▸ Environment ▸ Build Prototype Environment**) rebuilds `Ground`, `Boundary`, `House`,
-  `Forest`, `Props` and `LootSpawnPoints` from scratch out of primitives. Change the level by editing that script and
+  `Forest`, `Mountain`, `Props` and `LootSpawnPoints` from scratch out of primitives. Change the level by editing that script and
   re-running it, not by dragging cubes — a re-run destroys every root outside its `Keep` set
   (`Player`, `Systems`, `Directional Light`, `Global Volume`, `Generator`, `PlayerRespawn`, `FuelCans`,
   `Flashlight`, `SellStation`, `Store`, `Valuables`, `PatrolRoute`, `Monster_Test`),
@@ -83,6 +83,113 @@ four key fragments, and nothing else does.
   **88** (which also sets each monster's `roamRadius`), `NightDepth` **22/85**,
   `LootSpawner.shallowRadius`/`deepRadius` **22/90**, `Expedition` band **30–92 m**,
   loot rings Yard 9–20, Field 20–45, Deep 45–95.
+- **The south-east quarter is not forest — it is the mountain** (below). The woods fill the other
+  three corners exactly as before.
+
+### The mountain — the one place with no sky over it
+
+`BuildMountain` in the environment builder. The south-east corner of the map is a mass of rock with
+one cave in it: the level's **optional** place, darker and further out than anything else, holding
+better loot per piece and the second of the two UV/powder mysteries. Nothing in Level 1's own
+progression is inside it, and nothing may be put there — see *Where the fragments can hide*.
+
+- **It is laid out in `(s, t)`, never in `(x, z)`.** `s` runs from the house out along the diagonal
+  to the corner, `t` across it. In those coordinates the quarter is just "`s` past
+  `MountainFront` (**52**)", and the map's own edges are `|t| <= MountainReach - s`, so the mass
+  narrows to a point at the corner with no hand-written boundary numbers anywhere. `Mountain(s, t)`
+  converts; `MountainS(p)` goes back.
+- **One mass with one hole in it.** The wedge is filled with a grid of interlocking blocks
+  (`MountainCell` 6, overlapping by 1.4 so no two ever leave a seam to squeeze through), rising from
+  **11 m** at the face to **37 m** at the corner with two long waves over that so the skyline reads
+  weathered rather than cut. A block whose centre falls inside a carve from `CaveRuns` is not
+  skipped — it is **started at `CaveCeiling` (6.5) instead**, so the box that would have been solid
+  rock becomes the roof over a passage. There is deliberately no separate cave shell to keep aligned
+  with a separate mountain, and a void can never end up open to the sky.
+- **`CaveRuns` is the single description of the cave**: runs of `(s, t, carve)`. The mass, the
+  gravel floor, the dark volumes, the NavMesh cut-out and the loot regions are all read off it.
+  A carve is measured to a block's *centre*, so the walkable width is the carve less half a block
+  less the jitter — **6.6 gives about 4.6 m**. Do not take a passage carve much below 6: the grid
+  starts pinching shut on the diagonal and a player one metre wide cannot get through. This was
+  measured with a capsule flood-fill, not by eye.
+- **The mass is overrun by a block past the map edge.** Stopping exactly on the boundary leaves a
+  gap between the last block and the boundary wall wide enough to walk down — round the outside and
+  straight into the far end of the cave. It did, the first time.
+- **`NavMeshModifier` on the root, `overrideArea` = Not Walkable, applied to children.** The blocks
+  are big flat-topped boxes, so without it the bake covers the mountain in walkable islands twenty
+  metres up and 14% of monster spawn candidates land on the roof of the level. Separately,
+  `MonsterSpawner` now requires a spawn point to sample onto the NavMesh at all — measured 0 of 800
+  candidates on the mountain afterwards.
+- **The cave interior is carved OFF the NavMesh** by `NavMeshModifierVolume`s under `CaveOffMesh`,
+  one per passage. That is a decision, not a side effect: the wave in the woods has no idea the
+  place exists, and a blind hunter wandering into a pitch-dark cave is a balance question. **This is
+  the seam the mountain's own monster arrives on** — delete those volumes, or give it its own agent
+  type, and the cave joins the walkable world in one bake.
+- **`MountainInterior` (on the `Mountain` root) is the "no sky here" query.** Boxes scaled to each
+  passage; `Weight(point)` is 0 out in the woods and 1 well inside, faded by `softness` (4 m) on the
+  horizontal faces only — a cave is a few metres floor to ceiling and fading on height would leave a
+  standing player permanently half-lit. `NightDepth` folds it in and stays the only thing in the
+  game that writes ambient, fog or the moon. Measured: **1.00 everywhere inside** including all 23
+  UV marks, 0.93 at the mouth, **0.00 five metres outside it**.
+  - The volumes overrun each leg by `softness` at both ends so consecutive ones overlap by twice it.
+    Without that the length fade meets another length fade at every bend and each corner of the
+    cave is a patch of half-light — measured at 0.32 where it should be 1.
+  - It is on the mountain rather than on `Systems` because it owns no roll and no shared state, only
+    an answer about where the rock is. It is rebuilt with the rock.
+- `DarkQuarter.fixedCorner` is **SouthEast**, not `Roll`: a mountain cannot move between runs, so
+  the dark cannot either. The approach to the rock is the part of the map you need a bought
+  flashlight for, and the mouth is something you come upon rather than see from the treeline.
+  `Level2Site` is what keeps the UV trail out of that corner now (below). Set it back to `Roll` and
+  the original per-run behaviour returns untouched.
+- `Blocked` keeps trees `MountainClear` (6 m) off the face and 10 m off the mouth, and the two
+  tracks that used to run into this corner now give out well short of the rock — **a track ending at
+  the cave mouth would be a signpost to the one thing in the level worth finding on your own.**
+
+#### The mystery inside it
+
+The same two tools as the Level 2 trail, and a second, entirely optional chain: **find the dead
+man's note → sweep with the UV lamp → follow the marks to the back of the far gallery → pour powder
+at a blank wall → a door → what he was looking for.**
+
+| Piece | Owner | Where |
+|---|---|---|
+| The account of what he saw | `Readable` | `Mountain/Camp/Camp_Note` |
+| Marks only ultraviolet shows | `UVRevealed` (unchanged) | `Mountain/UVTrail`, 23 of them |
+| A wall that is not a wall | `Concealed` (`IPowderRevealable`) | `Mountain/HiddenDoor` |
+| The rock around it | plain geometry | `Mountain/DoorWall` — a **sibling**, see below |
+| The door itself | `DoorInteraction` (**E**), dormant until found | `Mountain/HiddenDoor/Door_Hinge` |
+| What is behind it | fuel cache + the run's deepest loot spots | `Mountain/Vault` |
+
+- **The note never names a mechanic.** It is a man's account — "the violet lamp", marks "there while
+  the lamp is on them and gone the moment it is not", a wall where "the air moves against my hand",
+  and a friend who says "a handful of anything fine enough would settle it. Chalk. Flour. Ash."
+  Working out that those are two things the store sells is the player's job. **Nina's drawing in the
+  shed is the other half of it** and neither is ever phrased as an instruction. Nothing gates on
+  either: a player who has already met the Level 2 trail needs no note at all.
+- **`Concealed` hides by swapping, not by switching off.** `UVRevealed`'s trick — renderers off —
+  cannot work for a door set into rock: switch its renderers off and you are looking down a corridor
+  that carries on into the dark, which gives the secret away to anyone who walks up to it; switch
+  its colliders off and you walk through the mountain. So while it is concealed what stands there is
+  `Door_Plug`, a slab of the same rock as everything around it, solid and flush. The powder swaps
+  plug for door, once, and never back. Its colliders are deliberately **not** in the swap.
+- **The `DoorWall` is a sibling of the door, not a child of it.** The powder finds what it has
+  landed near by looking up the hierarchy from whatever collider it touched, so a fourteen-metre
+  wall parented under the door would make every inch of the back of the gallery a place to find it.
+  Out on its own the wall is only rock. Measured: the pour works **within 5 m either side of the
+  doorway**, and does not work at the camp or the mouth.
+- **The wall is fourteen metres wide on purpose.** The far gallery is a carved blob, not a tube, so
+  the open floor at that plane is several metres wider than the passage leaving it; a wall spanning
+  only the passage leaves floor to walk round its ends and the vault is reachable with no powder at
+  all. It was. Verified by flood-fill: **0 of the 5 vault loot spots reachable before the reveal.**
+- **The vault is never a guaranteed payday.** It holds two fuel cans from the store prefab — fuel is
+  the only thing in this level that is really time — and five loot spots at the highest `extraDepth`
+  in the game. Everything else is the ordinary draw. A vault that always held the television would
+  turn the whole discovery into a route to run every night, which is exactly what Level 1 was
+  rebuilt to stop being.
+- `Level2Site` now rejects a bearing three ways: the door's own spot clear (as before), **not into
+  the dark corner** (`DarkQuarter.DistanceFromDark`, only asked while `IsFixed` — while the corner
+  is *rolled* the dependency runs the other way and must stay that way), and **every mark able to
+  reach real ground**, which is one general rule that happens to keep the trail out of the rock.
+  Measured: **47% of bearings are clear**, against 40 attempts.
 
 ### Door pattern — follow it exactly
 
@@ -201,6 +308,11 @@ No markers, no objective list, no timer. The only readout in the whole chain is 
   resume its pour when taken back out.
 - Ignoring a click while the jar is already tipping is the **motion finishing, not a limit on how
   often the powder may be used**. There is no such limit.
+- **The powder asks for `IPowderRevealable`, not for a `RevealCircle`.** It pours, looks for anything
+  within reach that offers itself up through that interface, and tells it — so the mountain's hidden
+  door needed no change to the jar at all, and the next hidden thing will not either. Whatever
+  implements it needs a collider the overlap search can hit **while the thing is still hidden**: a
+  trigger volume is the usual answer (the circle's `Circle_Volume`, `Concealed.probeVolume`).
 - **`RevealCircle` is found, not used — it is not an `IInteractable` at all.** There is no prompt
   and no key on it, because a circle that announced itself would give the door away to anyone who
   walked past without a UV flashlight. The pour does an `OverlapSphere` and asks whatever is in
@@ -265,6 +377,13 @@ Three rules shape the draw, and each one exists to keep searching honest:
   trunk** — a downward ray that *starts* inside a collider passes straight through it and finds the
   floor beneath, so the ray alone would happily bury a fragment in a tree. Same reasoning as
   `LootSpawner.TryResolveSurface`.
+- **Never on the mountain, and never inside it.** The top of the rock is flat and passes every other
+  test while being somewhere no player can stand, so a piece up there would simply never be found;
+  the cave under it is the opposite problem — perfectly reachable, but it is the level's *optional*
+  place, dangerous, pitch dark and behind a bought flashlight, and a key fragment in there would
+  quietly make all of that compulsory. `Expedition.Ground` refuses both (`mountainRootName`, then
+  `MountainInterior.Contains`). Measured over 4,000 draws: 25% of the ring is refused as rock, ~1%
+  as cave, and 2,818 good spots remain.
 - A fragment is pack-storable, so it costs one of the four slots — "carry this back or carry the
   radio back" is a decision made in the field, not in a menu.
 
@@ -483,6 +602,14 @@ that wave. `Assets/Prefabs/Monster.prefab`. Spawn points avoid the generator's r
 `Generator.IsInsideAnyRadius`, not `IsPointProtected`: the generator starts the level off, and a
 wave spawned in the yard before anyone could start it would be no choice at all.
 
+**A spawn point must also sample onto the NavMesh.** The ray finds the first surface under the sky,
+which since the mountain means the roof of the level — measured, 14% of candidates were landing on
+top of the rock with nowhere to walk. The test is skipped entirely when nothing is baked, so a scene
+with no NavMesh still gets its wave, exactly as `MonsterPatrol` still gets its circle. Measured
+afterwards: **0 of 800 candidates on the mountain.** The cave is off the mesh on purpose (see *The
+mountain*), so the current wave cannot get into it either — that is the seam its own monster
+arrives on.
+
 **The monster is blind.** It has no vision and never touches the player's transform — the only way
 anything reaches it is `Noise` (see below). `Monster` implements `INoiseListener`; there is no
 `target` field, and `SetTarget` is a deliberate no-op kept so the spawner needn't know what it spawned.
@@ -659,6 +786,12 @@ because the door openings are only 1.2 wide.
 - `NavMeshModifier` with `ignoreFromBuild` marks everything that must **not** carve a hole: `Player`,
   `Monster_Test`, and the carryable roots `FuelCans` / `Flashlight` / `Valuables`. A door hinge
   carries one too — a mesh baked around a shut door would leave every room an unreachable island.
+- **The `Mountain` root carries `NavMeshModifier` with `overrideArea` = Not Walkable and
+  `applyToChildren`**, so the rock is an obstacle and never a floor — otherwise its flat-topped
+  blocks bake into walkable islands twenty metres up. Separately, `Mountain/CaveOffMesh` holds one
+  `NavMeshModifierVolume` per passage, also Not Walkable, which is what keeps the current wave out
+  of the cave: the cave's floor is the `Ground` cube, so the root modifier does not cover it. Two
+  mechanisms, two distinct jobs; don't merge them.
 - **`Lab ▸ Environment ▸ Build Prototype Environment` re-bakes at the end** (`RebakeNavMesh`), so a
   rebuilt forest does not leave monsters routing around trees that are gone. `House` is *not* in the
   `Keep` set, so the doors' modifiers are re-added by `PrototypeEnvironmentBuilder.Door`.
@@ -951,6 +1084,14 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
   always; `AssignByDepth` then sends dearer pieces to spots further from `depthCentre` (the
   generator), blurred by chance by `1 − depthBias` (0.75). So rarity, caps and separation are
   untouched, and `depthBias` 0 is the old behaviour. The builder wires `depthCentre` and `focus`.
+- **`LootSpawnPoint.extraDepth` is how the mountain pays better without a second rarity number.**
+  Metres added to how deep a spot counts as, and it feeds the *pairing key* only. It exists because
+  distance saturates at `deepRadius` (90) and the far woods and the cave are both out past that —
+  measuring alone calls them equally deep, and they are not: the cave is the same walk with rock
+  overhead and no moon in it. `DepthKey` is therefore deliberately allowed past 1; it only ever
+  sorts spots against each other. **It cannot make a spot pay more often** — the table, the caps and
+  the odds of anything being there at all are untouched, so it moves *which* of the run's pieces
+  lands in the cave and never *whether* one does.
 - **Measured over 2,000 runs of the real `SpawnRun`** with the defaults (`commonValue` 40, exponent
   1.4, 6–9 items a run, averaging 7.5):
 
@@ -989,14 +1130,22 @@ prefab to `lootPrefabs` instead, or nothing will know it exists.
 (**Lab ▸ Loot ▸ Rebuild Loot Spawn Points**) generates the `LootSpawnPoints` root and
 **`Build Prototype Environment` re-runs it**, so a rebuilt house never leaves points in its new walls.
 
-- It samples a jittered grid over the whole house footprint plus three rings round the house (yard
-  9–20m, field 20–45m, deep 45–95m) and keeps
+- It samples a jittered grid over the whole house footprint, three rings round the house (yard
+  9–20m, field 20–45m, deep 45–95m) and **eight discs inside the mountain**, and keeps
   whatever survives the probe. **It deliberately does not describe the rooms** —
   the probe rejects walls, partitions and furniture on its own, so what remains is exactly the
   walkable floor and the tops of the furniture.
 - **Each region has its own cap.** A single shared budget is spent by whichever region is sampled
   first, which left the far field with zero points — and the far field is most of the reason to
   leave the house.
+- **The mountain's regions come from `PrototypeEnvironmentBuilder.CaveLootRegions`**, off the same
+  `CaveRuns` centreline the cave is carved from, so the two can never describe different caves and a
+  rebuilt cave never leaves points standing in its new rock. The caps are thin, and **thinnest deep
+  in** (mouth 2, main chamber 6, galleries 3 each, far gallery 3, vault 5 — 28 points in practice),
+  with `extraDepth` rising 4 → 48 outward. Thin caps are the whole reason the place is worth walking
+  into rather than worth farming: most of it is empty on any given night, and what is there is
+  dearer per piece. `minItems`/`maxItems` went 6–9 → **7–11** so the new region is paid for rather
+  than quietly thinning the woods. **Not balanced yet** — retune against a playtest and the haul.
 - Expanding means adding a region there, or dropping a `LootSpawnPoint` in by hand: the spawner
   takes every one it can find, wherever it is parented.
 
@@ -1049,6 +1198,13 @@ still feels like night; the deeper into the woods, the darker, until the flashli
 - **The flashlight is untouched by all three dials**, which is the whole point: a real light
   against a near-black corner reads enormously, and `fogScale` is kept at 1.25 because fog is
   the one dial that would dim the beam too.
+- **In Level 1 the corner is named, not rolled: `fixedCorner` = SouthEast, because that is where the
+  mountain is.** A mountain cannot move between runs, so the dark cannot either — the darkness there
+  is the approach to the rock rather than weather. With a corner named, the avoidance below runs the
+  other way round: `Level2Site` asks `DistanceFromDark` and rejects a bearing that would put the door
+  in the dark quarter, which is only safe *because* a named corner cannot be moved by the asking.
+  Everything in the two points below is what `Roll` still does, and setting it back to `Roll` brings
+  all of it back untouched.
 - **Which corner is drawn is a fresh roll every run, and it is even.** Measured over 2,000 runs:
   south-west 25.8%, south-east 25.1%, north-west 23.6%, north-east 25.6% (+z is north, +x east).
   It is a reservoir draw over the corners that survive the trail check — one pass, no attempt

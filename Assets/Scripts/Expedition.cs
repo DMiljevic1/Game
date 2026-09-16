@@ -62,6 +62,10 @@ public class Expedition : MonoBehaviour
     [Tooltip("How far above the ground a piece is set down.")]
     public float dropClearance = 0.05f;
 
+    [Tooltip("The root nothing may be hidden on. The mountain: its top is flat enough to pass " +
+             "every other test and is somewhere no player can ever stand.")]
+    public string mountainRootName = "Mountain";
+
     /// <summary>Fired once, when the gate opens.</summary>
     public event System.Action OnLevelComplete = delegate { };
 
@@ -222,6 +226,18 @@ public class Expedition : MonoBehaviour
         }
 
         if (Vector3.Angle(hit.normal, Vector3.up) > maxSurfaceSlope) return false;
+
+        // Never on the mountain, and never inside it.
+        //
+        // The top of the rock is flat and passes every test above while being somewhere no
+        // player can ever stand, so a piece hidden there would simply never be found. The cave
+        // under it is the opposite problem: perfectly reachable, but it is the level's optional
+        // place -- dangerous, pitch dark, and behind a bought flashlight. A key fragment in
+        // there would quietly make all of that compulsory, which is not what it is for.
+        if (hit.transform.root.name == mountainRootName) return false;
+
+        MountainInterior cave = MountainInterior.Instance;
+        if (cave != null && cave.Contains(hit.point + Vector3.up * 1.2f)) return false;
 
         Vector3 box = fitProbeSize * 0.5f;
         if (Physics.CheckBox(hit.point + Vector3.up * (box.y + 0.05f), box,

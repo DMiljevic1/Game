@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.Serialization;
 
 /// <summary>
@@ -117,6 +118,15 @@ public class MonsterSpawner : MonoBehaviour
 
             Vector3 ground = hit.point + Vector3.up * 1.1f;
 
+            // Somewhere it can actually walk from, not merely somewhere solid. The ray finds
+            // the first surface under the sky, and the map now has a mountain in one corner --
+            // without this a quarter of the candidates land on top of the rock, where a monster
+            // has nowhere to go, and the cave is carved off the mesh on purpose until it has a
+            // monster of its own. Skipped entirely when nothing is baked, so a scene with no
+            // NavMesh still gets its wave, exactly as MonsterPatrol still gets its circle.
+            NavMeshHit onMesh;
+            if (HaveNavMesh() && !NavMesh.SamplePosition(ground, out onMesh, 2f, NavMesh.AllAreas)) continue;
+
             // The radius, not the running state: the generator starts the level switched off,
             // and a wave spawned in the yard before anyone could start it would be no choice at all.
             if (Generator.IsInsideAnyRadius(ground)) continue;
@@ -128,6 +138,17 @@ public class MonsterSpawner : MonoBehaviour
 
         point = Vector3.zero;
         return false;
+    }
+
+    // Asked once: the triangulation is not cheap, and whether a mesh exists cannot change
+    // within a run.
+    private int meshBaked = -1;
+
+    /// <summary>Is there a baked NavMesh to test spawn points against at all?</summary>
+    private bool HaveNavMesh()
+    {
+        if (meshBaked < 0) meshBaked = NavMesh.CalculateTriangulation().indices.Length > 0 ? 1 : 0;
+        return meshBaked == 1;
     }
 
     void OnGUI()

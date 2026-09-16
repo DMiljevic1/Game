@@ -19,6 +19,15 @@ public class LootSpawnPoint : MonoBehaviour
              "medium loot can still appear here.")]
     public bool allowLargeItems = true;
 
+    [Tooltip("Metres to add to how deep this spot counts as, for the depth pairing only. " +
+             "Zero for open ground, where the walk out is the whole of the risk. Positive for " +
+             "somewhere that is worse than its distance says -- inside the mountain, where the " +
+             "walk is the same but you are under rock in the pitch dark. It moves WHICH of the " +
+             "drawn pieces lands here and nothing else: the table, the caps and the odds of " +
+             "anything at all being here are untouched, so this can never turn a spot into a " +
+             "guaranteed payday.")]
+    public float extraDepth = 0f;
+
     void OnDrawGizmos()
     {
         // Two colours, so a glance down the room says which points can take the big prize.
@@ -28,6 +37,9 @@ public class LootSpawnPoint : MonoBehaviour
 
         Vector3 p = transform.position;
         Gizmos.DrawWireSphere(p, 0.18f);
-        Gizmos.DrawLine(p, p + Vector3.up * 0.45f);
+
+        // A taller stalk for a spot that counts as deeper than it stands, so a glance down the
+        // cave says which of these the dear pieces are drawn towards.
+        Gizmos.DrawLine(p, p + Vector3.up * (0.45f + extraDepth * 0.02f));
     }
 }

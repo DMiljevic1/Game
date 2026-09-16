@@ -257,10 +257,12 @@ public class MagicPowder : Carryable
         {
             if (nearby[i] == null) continue;
 
-            RevealCircle circle = nearby[i].GetComponentInParent<RevealCircle>();
-            if (circle == null || circle.HasBeenUsed) continue;
+            // Anything that offers itself up, not the reveal circle in particular: the jar has
+            // no idea what it might find, so the next hidden thing needs no change here.
+            IPowderRevealable buried = nearby[i].GetComponentInParent<IPowderRevealable>();
+            if (buried == null || buried.HasBeenRevealed) continue;
 
-            circle.Reveal();
+            buried.Reveal();
             found = true;
         }
         return found;

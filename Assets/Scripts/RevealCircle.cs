@@ -16,7 +16,7 @@ using UnityEngine;
 /// Co-op note: authority-owned, like a sale. Clients see the dusting and the door appear.
 /// </summary>
 [DisallowMultipleComponent]
-public class RevealCircle : MonoBehaviour
+public class RevealCircle : MonoBehaviour, IPowderRevealable
 {
     [Tooltip("What appears when the powder is scattered here.")]
     public Level2Door door;
@@ -28,7 +28,7 @@ public class RevealCircle : MonoBehaviour
     private bool used;
 
     /// <summary>True once the powder has been scattered here. One way: a door found stays found.</summary>
-    public bool HasBeenUsed { get { return used; } }
+    public bool HasBeenRevealed { get { return used; } }
 
     void Awake()
     {

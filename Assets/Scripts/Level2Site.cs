@@ -56,10 +56,98 @@ public class Level2Site : MonoBehaviour
             Physics.SyncTransforms();
 
             if (door == null) return;
-            if (DoorSpotClear()) return;
+            if (BearingClear()) return;
         }
 
         Debug.LogWarning("Level2Site could not find a clear bearing for the door; using the last one.", this);
+    }
+
+    /// <summary>
+    /// Is this whole bearing usable? Three questions, cheapest first.
+    ///
+    /// The door's own spot has always had to be clear. The other two exist because the map now
+    /// has a mountain in one corner and the dark quarter sits on top of it:
+    ///
+    ///   * **Not into the dark corner.** A line of eighteen barely-visible footprints in the
+    ///     blackest part of the level would make the only thread the player has a matter of
+    ///     luck. While the corner is rolled that is <see cref="DarkQuarter"/>'s job and asking
+    ///     it here would force its roll before the trail had moved; while it is *named* there
+    ///     is no roll to force, so the check belongs on this side. Hence the IsFixed guard.
+    ///   * **The marks can reach real ground.** A mark that lands in solid rock is one the
+    ///     player can never find, and on a trail of eighteen every gap is a gap in the only
+    ///     thread there is. A handful of nudged marks is normal and always was; a bearing that
+    ///     loses more than <see cref="lostMarksAllowed"/> of them is pointing into something.
+    /// </summary>
+    private bool BearingClear()
+    {
+        if (!DoorSpotClear()) return false;
+
+        DarkQuarter dark = DarkQuarter.Instance;
+        if (dark != null && dark.IsFixed &&
+            dark.DistanceFromDark(door.transform.position) < dark.clearance)
+        {
+            return false;
+        }
+
+        return MarksCanReachGround();
+    }
+
+    [Tooltip("How many marks may fail to find ground before the whole bearing is rejected. A " +
+             "few nudged marks are normal; a trail with a hole in it is not.")]
+    public int lostMarksAllowed = 2;
+
+    /// <summary>
+    /// A dry run of <see cref="SitOnGround"/>: would every mark find somewhere to sit, at its
+    /// own spot or a nudge away? Nothing is moved -- this only counts the ones that could not.
+    /// </summary>
+    private bool MarksCanReachGround()
+    {
+        int lost = 0;
+
+        foreach (Transform child in transform)
+        {
+            if (CanSit(child.position)) continue;
+
+            if (++lost > lostMarksAllowed) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Is there ground at this spot, or within a nudge of it?</summary>
+    private bool CanSit(Vector3 at)
+    {
+        Vector3 seat;
+        bool nudged;
+        return TryFindSeat(at, out seat, out nudged);
+    }
+
+    /// <summary>
+    /// Where a mark dropped at this spot would end up: the ground beneath it, or the ground a
+    /// small spiral of <see cref="nudgeRadius"/> away if something is standing on it. One
+    /// definition, used both to place the marks and to judge a bearing before committing to it,
+    /// so what is tested and what happens cannot drift apart.
+    /// </summary>
+    private bool TryFindSeat(Vector3 at, out Vector3 seat, out bool nudged)
+    {
+        nudged = false;
+
+        Vector3 found;
+        if (GroundAt(at, out found)) { seat = new Vector3(at.x, found.y, at.z); return true; }
+
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i / 8f * Mathf.PI * 2f;
+            Vector3 side = at + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * nudgeRadius;
+
+            if (!GroundAt(side, out found)) continue;
+
+            seat = new Vector3(side.x, found.y, side.z);
+            nudged = true;
+            return true;
+        }
+
+        seat = at;
+        return false;
     }
 
     // Reused by the clearance test, so choosing a bearing allocates nothing.
@@ -112,30 +200,13 @@ public class Level2Site : MonoBehaviour
 
         foreach (Transform child in transform)
         {
-            Vector3 p = child.position;
-            Vector3 found;
+            Vector3 seat;
+            bool nudged;
 
-            if (GroundAt(p, out found))
-            {
-                child.position = new Vector3(p.x, found.y + child.localPosition.y, p.z);
-                continue;
-            }
+            if (!TryFindSeat(child.position, out seat, out nudged)) { lost++; continue; }
+            if (nudged) moved++;
 
-            bool placed = false;
-            for (int i = 0; i < 8 && !placed; i++)
-            {
-                float a = i / 8f * Mathf.PI * 2f;
-                Vector3 side = p + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * nudgeRadius;
-
-                if (GroundAt(side, out found))
-                {
-                    child.position = new Vector3(side.x, found.y + child.localPosition.y, side.z);
-                    placed = true;
-                    moved++;
-                }
-            }
-
-            if (!placed) lost++;
+            child.position = new Vector3(seat.x, seat.y + child.localPosition.y, seat.z);
         }
 
         if (moved > 0 || lost > 0)

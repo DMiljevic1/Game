@@ -12,6 +12,13 @@ using UnityEngine;
 /// eighteen barely-visible footprints in the darkest part of the map would make the only
 /// thread the player has a matter of luck.
 ///
+/// Level 1 **names** its corner rather than rolling one, because the mountain is built into
+/// one corner of the map and a mountain cannot move between runs. There the darkness is the
+/// approach to the mountain rather than weather, and it is the trail that has to keep out of
+/// the way -- <see cref="Level2Site"/> asks <see cref="DistanceFromDark"/> and rejects a
+/// bearing that would run into it. Set <see cref="fixedCorner"/> back to Roll and the
+/// original behaviour comes back untouched, avoidance and all.
+///
 /// Two things soften it, and both exist so the dark reads as weather rather than as a line
 /// painted on the ground: <see cref="edgeSoftness"/> metres of fade across each of the two
 /// quadrant boundaries, and a fade out towards the base, so the generator's yard is never in
@@ -25,6 +32,16 @@ using UnityEngine;
 public class DarkQuarter : MonoBehaviour
 {
     public static DarkQuarter Instance { get; private set; }
+
+    /// <summary>Which corner is dark, +z being north and +x east. <see cref="Roll"/> draws one.</summary>
+    public enum Quarter { Roll, NorthEast, NorthWest, SouthEast, SouthWest }
+
+    [Header("Which corner")]
+    [Tooltip("Roll draws a fresh corner every run from the ones the Level 2 trail does not " +
+             "run into. Name a corner instead when something is BUILT there and the darkness " +
+             "has to sit on top of it -- the mountain is in one corner of the map and cannot " +
+             "move, so the dark quarter cannot either.")]
+    public Quarter fixedCorner = Quarter.Roll;
 
     [Header("The map")]
     [Tooltip("Centre of the playable square -- where the four quarters meet. The ground is built " +
@@ -89,6 +106,15 @@ public class DarkQuarter : MonoBehaviour
     /// <summary>Which corner is dark, as a pair of signs on x and z. Readouts and tooling.</summary>
     public Vector2 Corner { get { EnsureChosen(); return new Vector2(signX, signZ); } }
 
+    /// <summary>
+    /// True when the corner was named rather than drawn. That is the one case where something
+    /// else -- <see cref="Level2Site"/> -- may safely ask where the dark is while it is still
+    /// placing itself: a named corner cannot be moved by the asking, so there is no order to
+    /// depend on. While it is rolled the dependency runs the other way round and must stay
+    /// that way, or the roll happens before the trail has moved.
+    /// </summary>
+    public bool IsFixed { get { return fixedCorner != Quarter.Roll; } }
+
     /// <summary>The corner in words, +z being north and +x east.</summary>
     public string CornerName
     {
@@ -135,6 +161,20 @@ public class DarkQuarter : MonoBehaviour
 
         if (!HasAuthority) return;
 
+        // A named corner is not a roll and has nothing to avoid: something is standing in it.
+        if (IsFixed)
+        {
+            signX = fixedCorner == Quarter.NorthEast || fixedCorner == Quarter.SouthEast ? 1f : -1f;
+            signZ = fixedCorner == Quarter.NorthEast || fixedCorner == Quarter.NorthWest ? 1f : -1f;
+
+            if (logChoice)
+            {
+                Debug.Log("DarkQuarter: the " + CornerName + " quarter of the map is the dark one, " +
+                          "and stays the dark one -- it is where the mountain is.", this);
+            }
+            return;
+        }
+
         Vector2 furthest = new Vector2(-1f, 1f);
         float furthestDistance = -1f;
 
@@ -172,6 +212,16 @@ public class DarkQuarter : MonoBehaviour
     }
 
     /// <summary>
+    /// How far a point is from the dark corner's ground, 0 meaning it stands in it. Only safe
+    /// to ask while <see cref="IsFixed"/> -- see there.
+    /// </summary>
+    public float DistanceFromDark(Vector3 point)
+    {
+        EnsureChosen();
+        return DistanceTo(new Vector2(signX, signZ), point);
+    }
+
+    /// <summary>
     /// How far the Level 2 door is from a corner's ground, 0 meaning it stands in it. A corner
     /// is a quadrant, so the distance is only the part of the offset pointing the wrong way on
     /// each axis.
@@ -179,8 +229,12 @@ public class DarkQuarter : MonoBehaviour
     private float DoorDistanceTo(Vector2 corner)
     {
         if (avoid == null) return Mathf.Infinity;
+        return DistanceTo(corner, avoid.position);
+    }
 
-        Vector3 offset = avoid.position - mapCentre;
+    private float DistanceTo(Vector2 corner, Vector3 at)
+    {
+        Vector3 offset = at - mapCentre;
         float x = Mathf.Max(0f, -corner.x * offset.x);
         float z = Mathf.Max(0f, -corner.y * offset.z);
         return Mathf.Sqrt(x * x + z * z);

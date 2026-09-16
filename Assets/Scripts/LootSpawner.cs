@@ -141,12 +141,17 @@ public class LootSpawner : MonoBehaviour
         public readonly bool allowLarge;
         public readonly bool pinned;
 
-        public Draw(int kind, Vector3 surface, bool allowLarge, bool pinned)
+        /// <summary>The spot's own <see cref="LootSpawnPoint.extraDepth"/>, carried so the
+        /// pairing can read it after the point itself is out of the picture.</summary>
+        public readonly float extraDepth;
+
+        public Draw(int kind, Vector3 surface, bool allowLarge, bool pinned, float extraDepth)
         {
             this.kind = kind;
             this.surface = surface;
             this.allowLarge = allowLarge;
             this.pinned = pinned;
+            this.extraDepth = extraDepth;
         }
     }
 
@@ -206,7 +211,7 @@ public class LootSpawner : MonoBehaviour
             int kind = PickKind(point.allowLargeItems, false);
             if (kind < 0) break;                       // every kind has hit its cap
 
-            draws.Add(new Draw(kind, surface, point.allowLargeItems, false));
+            draws.Add(new Draw(kind, surface, point.allowLargeItems, false, point.extraDepth));
             taken.Add(surface);
         }
 
@@ -245,7 +250,7 @@ public class LootSpawner : MonoBehaviour
                 Debug.LogWarning("LootSpawner could not fit a guaranteed Large piece this run.", this);
                 break;
             }
-            draws[victim] = new Draw(kind, draws[victim].surface, true, false);
+            draws[victim] = new Draw(kind, draws[victim].surface, true, false, draws[victim].extraDepth);
         }
 
         // The first Large piece goes beside the camp, however it was drawn -- a lucky natural
@@ -256,7 +261,8 @@ public class LootSpawner : MonoBehaviour
         if (first < 0) return;
 
         Vector3 spot;
-        if (!TryFocusSpot(out spot))
+        float extra;
+        if (!TryFocusSpot(out spot, out extra))
         {
             Debug.LogWarning("LootSpawner found no room for a Large piece within " + focusRadius +
                              " m of " + focus.name + "; it stays where it was drawn.", this);
@@ -264,13 +270,14 @@ public class LootSpawner : MonoBehaviour
         }
 
         taken.Add(spot);
-        draws[first] = new Draw(draws[first].kind, spot, true, true);
+        draws[first] = new Draw(draws[first].kind, spot, true, true, extra);
     }
 
     /// <summary>A spot that can take a Large piece within <see cref="focusRadius"/> of the focus.</summary>
-    private bool TryFocusSpot(out Vector3 spot)
+    private bool TryFocusSpot(out Vector3 spot, out float extraDepth)
     {
         spot = Vector3.zero;
+        extraDepth = 0f;
         if (focus == null) return false;
 
         float sqr = focusRadius * focusRadius;
@@ -290,6 +297,7 @@ public class LootSpawner : MonoBehaviour
             if (IsTooCloseToTakenSpot(surface)) continue;
 
             spot = surface;
+            extraDepth = point.extraDepth;
             return true;
         }
         return false;
@@ -339,7 +347,7 @@ public class LootSpawner : MonoBehaviour
         {
             Draw d = draws[free[i]];
             spots.Add(d);
-            keys.Add(Mathf.Lerp(Random.value, Depth01(d.surface), depthBias));
+            keys.Add(Mathf.Lerp(Random.value, DepthKey(d), depthBias));
             kinds.Add(d.kind);
         }
 
@@ -362,7 +370,7 @@ public class LootSpawner : MonoBehaviour
             if (best < 0) continue;
 
             used[best] = true;
-            draws[free[k]] = new Draw(kinds[k], spots[best].surface, spots[best].allowLarge, false);
+            draws[free[k]] = new Draw(kinds[k], spots[best].surface, spots[best].allowLarge, false, spots[best].extraDepth);
         }
     }
 
@@ -372,6 +380,22 @@ public class LootSpawner : MonoBehaviour
         bool largeB = IsLarge(b);
         if (largeA != largeB) return largeA ? -1 : 1;
         return ValueOf(b).CompareTo(ValueOf(a));
+    }
+
+    /// <summary>
+    /// How deep a drawn spot counts as, for the pairing only.
+    ///
+    /// It is deliberately allowed past 1. Distance saturates at <see cref="deepRadius"/> and
+    /// the far woods and the mountain are both out there, so measuring alone would call them
+    /// equally deep -- and the mountain is not: it is the same walk with rock over your head
+    /// and no moon in it. The point's own <see cref="LootSpawnPoint.extraDepth"/>, expressed in
+    /// the same units the radii are, is what separates them, and because it only ever sorts
+    /// spots against each other an unbounded key is exactly what is wanted.
+    /// </summary>
+    private float DepthKey(Draw d)
+    {
+        float span = Mathf.Max(1f, deepRadius - shallowRadius);
+        return Depth01(d.surface) + d.extraDepth / span;
     }
 
     /// <summary>0 at <see cref="shallowRadius"/> from the depth centre or nearer, 1 at <see cref="deepRadius"/> or further.</summary>

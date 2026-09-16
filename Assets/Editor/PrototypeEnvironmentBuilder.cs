@@ -60,7 +60,7 @@ public static class PrototypeEnvironmentBuilder
 
     static Material grass, dirt, wallExt, wallInt, floorWood, roofMat, wood, plank,
                     fabric, metalDark, metalPale, glass, bark, foliage, foliageAlt,
-                    rockMat, bushMat, lampWarm, lampDead, ceramic, paint;
+                    rockMat, bushMat, lampWarm, lampDead, ceramic, paint, caveFloor;
 
     // Trunk positions, so props and the path can avoid growing inside a tree.
     static readonly List<Vector2> occupied = new List<Vector2>();
@@ -76,12 +76,16 @@ public static class PrototypeEnvironmentBuilder
         new[] { new Vector2(-4f, 11f), new Vector2(-14f, 21f), new Vector2(-26f, 30f), new Vector2(-44f, 34f), new Vector2(-58f, 36f) },
         // north-east: out to the fallen-roof cabin, then north to the hunting stand
         new[] { new Vector2(5f, 12f), new Vector2(12f, 30f), new Vector2(18f, 52f), new Vector2(-6f, 64f), new Vector2(-30f, 70f) },
-        // east: the garage, forking north to the culvert and south to the far house
+        // east: the garage, forking north to the culvert and back out into the trees. The
+        // south-east fork used to run on to the far house; the mountain stands where that
+        // house was, and the track now gives out well short of the rock -- a track that ended
+        // at the cave mouth would be a signpost to the one thing in the level worth finding
+        // on your own.
         new[] { new Vector2(11f, -7f), new Vector2(24f, -16f), new Vector2(34f, -22f) },
         new[] { new Vector2(34f, -22f), new Vector2(46f, -4f), new Vector2(52f, 22f) },
-        new[] { new Vector2(34f, -22f), new Vector2(56f, -34f), new Vector2(74f, -48f) },
-        // south: down past the fence line to the quarry
-        new[] { new Vector2(4.7f, -21f), new Vector2(8f, -46f), new Vector2(10f, -70f), new Vector2(10f, -86f) },
+        new[] { new Vector2(34f, -22f), new Vector2(44f, -14f), new Vector2(50f, -2f) },
+        // south: down past the fence line to the quarry, curving away from the rock
+        new[] { new Vector2(4.7f, -21f), new Vector2(8f, -46f), new Vector2(0f, -60f), new Vector2(-10f, -70f) },
         // west and south-west: the wreck to the green-door cabin, and a track that gives out
         // well short of Tom's camp -- the paint marks take over from there
         new[] { new Vector2(-12.5f, -14f), new Vector2(-28f, -12f), new Vector2(-44f, -6f) },
@@ -90,6 +94,116 @@ public static class PrototypeEnvironmentBuilder
 
     const float TrailHalfWidth = 1.1f;    // the dirt strip itself
     const float TrailClear = 2.2f;        // nothing grows this close to the centreline
+
+    // ------------------------------------------------------------- the mountain
+    // The south-east quarter of the map is rock rather than woods: a mass you cannot walk
+    // over, cannot see into, and can only get inside through one mouth in its face.
+    //
+    // Everything about it is laid out in (s, t) rather than (x, z), because the thing it has
+    // to fit is a CORNER of a square map. s runs from the house out along the diagonal towards
+    // the corner, t runs across it. In those coordinates the quarter is simply "s past the
+    // front", and the map's own edges are |t| <= MountainReach - s, so the mass narrows to a
+    // point at the corner without a single hand-written boundary number.
+    const float MountainFront = 52f;               // the rock face, measured along the corner axis
+    const float MountainReach = 141.4214f;         // GroundHalf * sqrt(2): the corner itself
+    const float MountainCell = 6f;                 // grid pitch of the rock mass
+    const float MountainOverlap = 1.4f;            // blocks overlap, so no two ever leave a gap to squeeze through
+    const float MountainBaseHeight = 11f;          // at the face: already unclimbable
+    const float MountainPeakHeight = 37f;          // at the corner
+    const float CaveCeiling = 6.5f;                // rock overhead: the floor of every block above a void
+    const float MountainClear = 6f;                // no tree grows this close to the face
+    const float CaveDarkSoftness = 4f;             // metres of fade at the mouth, and the volumes' overlap
+
+    /// <summary>
+    /// The cave, as runs of (s, t, carve) -- a centreline and how far the rock is pushed back
+    /// along it. Every block whose centre falls inside a carve is simply not built, so the
+    /// passages ARE the gaps in the mass and there is no second description of the cave's
+    /// shape to keep in step with the first. The dark volumes, the floor, the loot regions and
+    /// the NavMesh cut-out are all read off these same numbers.
+    ///
+    /// The first run starts in FRONT of the face, which is what opens the mouth; the last one
+    /// is the bit behind the hidden door, and is reachable only once the powder has found it.
+    /// </summary>
+    static readonly Vector3[][] CaveRuns =
+    {
+        // the way in: a mouth in the face, bending twice so the forest is out of sight in
+        // a few strides, into the chamber the whole cave hangs off
+        new[] { new Vector3(52f, 23f, 6.6f), new Vector3(58f, 19f, 6.6f), new Vector3(66f, 12f, 6.8f), new Vector3(74f, 6f, 11f) },
+        // a side gallery running back towards the face: a dead end, and the widest empty space
+        new[] { new Vector3(74f, 6f, 11f), new Vector3(80f, 20f, 6.6f), new Vector3(86f, 27f, 8.5f) },
+        // a short hollow off the other side of the chamber, also a dead end
+        new[] { new Vector3(74f, 6f, 11f), new Vector3(73f, -8f, 6.6f), new Vector3(76f, -18f, 8f) },
+        // deeper: the run the marks follow, out to the far gallery
+        new[] { new Vector3(74f, 6f, 11f), new Vector3(82f, -4f, 6.6f), new Vector3(92f, -12f, 6.6f),
+                new Vector3(102f, -10f, 6.6f), new Vector3(110f, -16f, 8.5f) },
+        // through the back wall of the far gallery, and what is behind it
+        new[] { new Vector3(110f, -16f, 8.5f), new Vector3(MountainDoorS, MountainDoorT, 6.4f), new Vector3(120f, -8f, 7.5f) },
+    };
+
+    // A carve is measured to a block's CENTRE, so what is actually walkable is the carve less
+    // half a block less the jitter: at carve 6.6 a passage comes out about 4.6 m across. Take
+    // any of these much below 6 and the grid starts pinching passages shut on the diagonal,
+    // where a player one metre wide cannot get through at all.
+
+    // Where the far gallery's back wall stands, and which way through it faces.
+    const float MountainDoorS = 114f;
+    const float MountainDoorT = -14f;
+
+    /// <summary>
+    /// The line the UV marks follow: out of the chamber where the note is, along the deep run,
+    /// stopping a couple of metres short of a wall with nothing in it.
+    /// </summary>
+    static readonly Vector2[] CaveTrail =
+    {
+        new Vector2(72f, 10f), new Vector2(74f, 6f), new Vector2(82f, -4f), new Vector2(92f, -12f),
+        new Vector2(102f, -10f), new Vector2(110f, -16f), new Vector2(112.6f, -15.3f)
+    };
+
+    /// <summary>
+    /// The mouth of the cave, in world coordinates: the one way in. Where the first run crosses
+    /// the face of the rock, which is half a block in front of the first row of blocks.
+    /// </summary>
+    public static Vector3 CaveMouth { get { return Mountain(51.5f, 23.4f); } }
+
+    /// <summary>World position of a point on the mountain's own (s, t) grid, at ground level.</summary>
+    static Vector3 Mountain(float s, float t)
+    {
+        const float k = 0.7071068f;
+        return new Vector3(k * (s + t), GroundTop, k * (t - s));
+    }
+
+    /// <summary>How far out along the corner axis a world point lies. The face is at MountainFront.</summary>
+    static float MountainS(Vector2 p)
+    {
+        return 0.7071068f * (p.x - p.y);
+    }
+
+    /// <summary>
+    /// Is this (s, t) inside one of the cave's passages? The one definition -- the mass, the
+    /// floor, the dark and the NavMesh cut-out all ask it, so they cannot describe different
+    /// caves.
+    /// </summary>
+    static bool InCave(float s, float t, float margin)
+    {
+        Vector2 p = new Vector2(s, t);
+
+        foreach (Vector3[] run in CaveRuns)
+        {
+            for (int i = 0; i < run.Length - 1; i++)
+            {
+                Vector2 a = new Vector2(run[i].x, run[i].y);
+                Vector2 b = new Vector2(run[i + 1].x, run[i + 1].y);
+
+                Vector2 ab = b - a;
+                float lengthSq = ab.sqrMagnitude;
+                float u = lengthSq < 0.0001f ? 0f : Mathf.Clamp01(Vector2.Dot(p - a, ab) / lengthSq);
+
+                float carve = Mathf.Lerp(run[i].z, run[i + 1].z, u);
+                if (Vector2.Distance(p, a + ab * u) < carve + margin) return true;
+            }
+        }
+        return false;
+    }
 
     [MenuItem("Lab/Environment/Build Prototype Environment")]
     public static void Build()
@@ -125,6 +239,7 @@ public static class PrototypeEnvironmentBuilder
         List<Light> houseLights = BuildHouseLights(house);
         BuildFurniture(house);
         BuildForest();
+        BuildMountain();
         BuildProps();
 
         // After every collider exists and before anything reads the level: loot points are
@@ -255,6 +370,9 @@ public static class PrototypeEnvironmentBuilder
         foliage    = Mat("Tree_Foliage",    new Color(0.035f, 0.060f, 0.040f), 0.04f, 0f, Color.black);
         foliageAlt = Mat("Tree_FoliageAlt", new Color(0.050f, 0.065f, 0.045f), 0.04f, 0f, Color.black);
         rockMat    = Mat("Env_Rock",        new Color(0.105f, 0.105f, 0.115f), 0.10f, 0f, Color.black);
+        // Under the mountain: colder and flatter than the boulders outside, so a cave wall in
+        // a flashlight beam does not read as the same grey as a rock in the moonlight.
+        caveFloor  = Mat("Env_CaveFloor",   new Color(0.080f, 0.075f, 0.070f), 0.04f, 0f, Color.black);
         bushMat    = Mat("Env_Bush",        new Color(0.040f, 0.058f, 0.038f), 0.03f, 0f, Color.black);
         lampWarm   = Mat("Light_WarmBulb",  new Color(0.320f, 0.230f, 0.130f), 0.30f, 0f, new Color(3.2f, 2.0f, 0.85f));
         lampDead   = Mat("Light_DeadBulb",  new Color(0.180f, 0.180f, 0.170f), 0.60f, 0f, Color.black);
@@ -761,6 +879,13 @@ public static class PrototypeEnvironmentBuilder
         if (p.x > 2.4f && p.x < 7.0f && p.y > -22f && p.y < -5f) return true;                // path
         if (Vector2.Distance(p, new Vector2(PlayerSpawn.x, PlayerSpawn.z)) < 4f) return true;
 
+        // Nothing grows on the mountain or hard against its face: the rock is placed as one
+        // mass afterwards, and a trunk standing inside it would be a tree in a wall. The apron
+        // in front of the mouth is kept clear too, so the one way in is something you can see
+        // from a few strides away rather than a slot behind a pine.
+        if (MountainS(p) > MountainFront - MountainClear) return true;
+        if (Vector2.Distance(p, new Vector2(CaveMouth.x, CaveMouth.z)) < 10f) return true;
+
 
         // The tracks are cleared before a single tree is placed. Doing it the other way
         // round -- growing the forest and then carving -- leaves trunks standing in the
@@ -977,6 +1102,544 @@ public static class PrototypeEnvironmentBuilder
              new Vector3(s, s * 0.7f, s * Random.Range(0.7f, 1.2f)), rockMat,
              new Vector3(Random.Range(-20f, 20f), Random.Range(0f, 360f), Random.Range(-20f, 20f)),
              s > 0.9f);
+    }
+
+    // -------------------------------------------------------------- the mountain
+    /// <summary>
+    /// The rock that replaced the south-east quarter of the forest.
+    ///
+    /// **It is one mass with one hole in it.** The wedge is filled with a grid of
+    /// interlocking blocks, rising from the face towards the corner, and every block whose
+    /// centre falls inside a carve from <see cref="CaveRuns"/> is simply not built from the
+    /// ground up -- it starts at <see cref="CaveCeiling"/> instead, so the same box that would
+    /// have been solid rock becomes the roof over a passage. That is the whole trick: there is
+    /// no separate cave shell to keep aligned with a separate mountain, and a void can never
+    /// end up with a hole in its ceiling or a gap to the sky.
+    ///
+    /// Blocks overlap by <see cref="MountainOverlap"/> and the jitter is kept under half of
+    /// that, so neighbours always intersect -- otherwise a player would eventually find the
+    /// one seam they could walk through, and "inaccessible except by the mouth" would be a
+    /// claim rather than a fact.
+    ///
+    /// What the run then hangs on it, in order: the floor, the dark, the cut-out that keeps
+    /// the current monsters out until this place has one of its own, the dead man's camp and
+    /// his note, the marks only ultraviolet shows, and the wall at the end of them.
+    /// </summary>
+    static void BuildMountain()
+    {
+        Transform root = Root("Mountain");
+
+        // The rock is an obstacle, never a floor. Its blocks are big flat-topped boxes, so
+        // without this the bake covers the whole mountain in walkable islands twenty metres
+        // up -- measured, 14% of spawn candidates were landing on the roof of the level and
+        // standing there all night. Marking it Not Walkable leaves it solid to the voxeliser
+        // and out of the mesh.
+        //
+        // It does NOT make the cave off-mesh: the cave's floor is the ground cube, which is not
+        // a child of this. That is what the CaveOffMesh volumes are for, and the two jobs are
+        // separate on purpose.
+        NavMeshModifier obstacle = root.gameObject.AddComponent<NavMeshModifier>();
+        obstacle.overrideArea = true;
+        obstacle.area = 1;                       // Not Walkable
+        obstacle.applyToChildren = true;
+
+        Transform mass = Group(root, "Mass");
+        Transform roofs = Group(root, "Roof");
+        Transform floors = Group(root, "Floor");
+        Transform scree = Group(root, "Scree");
+
+        // Blocks are laid out on the corner axis, so they stand square to the rock face
+        // rather than to the world.
+        const float yaw = 135f;
+        int solid = 0, voids = 0;
+
+        for (float s = MountainFront + MountainCell * 0.5f; s < MountainReach; s += MountainCell)
+        {
+            // The map's own edges, in this frame. Overrun them by a block: a mass that stopped
+            // exactly on the boundary would leave a gap between the last block and the
+            // boundary wall wide enough to walk down -- straight round the outside of the
+            // mountain and into the far end of it, which is the one thing it must not allow.
+            float halfWidth = MountainReach - s + MountainCell;
+
+            for (float t = -halfWidth; t <= halfWidth; t += MountainCell)
+            {
+                float js = s + Random.Range(-0.6f, 0.6f);
+                float jt = t + Random.Range(-0.6f, 0.6f);
+
+                Vector3 at = Mountain(js, jt);
+                if (Mathf.Abs(at.x) > GroundHalf + MountainCell ||
+                    Mathf.Abs(at.z) > GroundHalf + MountainCell) continue;
+
+                // Taller the further in, so the mass reads as a mountain from the treeline
+                // rather than as a wall. Two long waves across it on top of that, because a
+                // clean ramp of blocks reads as a quarry: the ridges and hollows they put in
+                // are what make the skyline look weathered rather than cut.
+                float height = Mathf.Lerp(MountainBaseHeight, MountainPeakHeight,
+                                          (js - MountainFront) / (MountainReach - MountainFront))
+                               + Mathf.Sin(js * 0.085f) * 5.5f + Mathf.Cos(jt * 0.115f + 1.3f) * 4.5f
+                               + Random.Range(-2.5f, 2.5f);
+
+                height = Mathf.Max(height, CaveCeiling + 3f);   // never thinner than the cave's roof
+
+                bool hollow = InCave(js, jt, 0f);
+                float bottom = hollow ? CaveCeiling : -2f;
+                if (hollow) voids++; else solid++;
+
+                Prim(hollow ? roofs : mass, (hollow ? "Roof_" : "Rock_") + solid + "_" + voids,
+                     PrimitiveType.Cube,
+                     new Vector3(at.x, (bottom + height) * 0.5f, at.z),
+                     new Vector3(MountainCell + MountainOverlap, height - bottom, MountainCell + MountainOverlap),
+                     rockMat, new Vector3(0f, yaw + Random.Range(-4f, 4f), 0f));
+
+                if (hollow)
+                {
+                    // Gravel underfoot, render-only: the ground cube is still what you walk on.
+                    Prim(floors, "CaveFloor_" + voids, PrimitiveType.Cube,
+                         new Vector3(at.x, GroundTop + 0.01f, at.z),
+                         new Vector3(MountainCell + MountainOverlap, 0.02f, MountainCell + MountainOverlap),
+                         caveFloor, new Vector3(0f, yaw, 0f), false);
+                }
+                else if (js < MountainFront + MountainCell * 2.5f || Random.value < 0.45f)
+                {
+                    // Boulders on the shoulders, so the silhouette is not a staircase of cubes.
+                    float r = Random.Range(2.5f, 6.5f);
+                    Prim(scree, "Boulder_" + solid, PrimitiveType.Sphere,
+                         new Vector3(at.x + Random.Range(-2f, 2f), height - r * 0.35f, at.z + Random.Range(-2f, 2f)),
+                         new Vector3(r, r * Random.Range(0.5f, 0.8f), r * Random.Range(0.8f, 1.2f)), rockMat,
+                         new Vector3(Random.Range(-20f, 20f), Random.Range(0f, 360f), Random.Range(-20f, 20f)), false);
+                }
+            }
+        }
+
+        BuildMountainSkirt(scree);
+        BuildCaveVolumes(root);
+        BuildCaveMouth(root);
+        BuildCaveCamp(root);
+        BuildCaveTrail(root);
+        BuildHiddenDoor(root);
+
+        Debug.Log(string.Format("Mountain built: {0} blocks of rock, {1} of them hanging over the cave.",
+                                solid, voids));
+    }
+
+    /// <summary>
+    /// Fallen rock heaped along the foot of the face, render-only. Without it the mountain
+    /// meets the grass on a dead straight line and reads as scenery rather than as ground.
+    /// </summary>
+    static void BuildMountainSkirt(Transform parent)
+    {
+        for (int i = 0; i < 120; i++)
+        {
+            float t = Random.Range(-(MountainReach - MountainFront), MountainReach - MountainFront);
+            float s = MountainFront + Random.Range(-4.5f, 1.5f);
+
+            Vector3 at = Mountain(s, t);
+            if (Mathf.Abs(at.x) > GroundHalf - 1f || Mathf.Abs(at.z) > GroundHalf - 1f) continue;
+            if (Vector2.Distance(new Vector2(at.x, at.z), new Vector2(CaveMouth.x, CaveMouth.z)) < 7f) continue;
+
+            float r = Random.Range(0.8f, 3.4f);
+            Prim(parent, "Scree_" + i, PrimitiveType.Sphere,
+                 new Vector3(at.x, GroundTop + r * 0.2f, at.z),
+                 new Vector3(r, r * 0.7f, r * Random.Range(0.7f, 1.3f)), rockMat,
+                 new Vector3(Random.Range(-25f, 25f), Random.Range(0f, 360f), Random.Range(-25f, 25f)),
+                 r > 2.2f);
+        }
+    }
+
+    /// <summary>
+    /// One box per passage, twice over: the volume <see cref="MountainInterior"/> reads to know
+    /// the sky is gone, and a NavMesh cut-out over the same box.
+    ///
+    /// **The cut-out is deliberate and is the seam the mountain's own monster arrives on.** The
+    /// wave in the woods has no idea this place exists, and a blind hunter wandering into a
+    /// pitch-black cave the player is feeling their way through is a balance decision, not a
+    /// side effect of geometry. Delete these volumes -- or give the mountain monster its own
+    /// agent type -- and the cave joins the walkable world in one bake.
+    /// </summary>
+    static void BuildCaveVolumes(Transform root)
+    {
+        Transform dark = Group(root, "CaveDark");
+        Transform offMesh = Group(root, "CaveOffMesh");
+
+        List<Transform> volumes = new List<Transform>();
+        int n = 0;
+
+        foreach (Vector3[] run in CaveRuns)
+        {
+            for (int i = 0; i < run.Length - 1; i++, n++)
+            {
+                Vector3 a = Mountain(run[i].x, run[i].y);
+                Vector3 b = Mountain(run[i + 1].x, run[i + 1].y);
+
+                float width = (Mathf.Max(run[i].z, run[i + 1].z) + 1.5f) * 2f;
+
+                // Overrun each end by the fade distance, so consecutive volumes overlap by
+                // twice it and every corner between two passages is deep inside at least one
+                // of them. Without it the fade on the length axis meets another fade at the
+                // joint and every bend in the cave is a patch of half-light -- measured at 0.32
+                // where it should be 1. The first run starts on the face of the rock, so the
+                // only overrun that shows is the one at the mouth, which is the fade wanted.
+                float length = Vector3.Distance(a, b) + CaveDarkSoftness * 2f;
+                float heading = Mathf.Atan2(b.x - a.x, b.z - a.z) * Mathf.Rad2Deg;
+
+                Vector3 centre = (a + b) * 0.5f;
+                centre.y = CaveCeiling * 0.5f;
+
+                GameObject box = new GameObject("CaveVolume_" + n);
+                box.transform.SetParent(dark, false);
+                box.transform.localPosition = centre;
+                box.transform.localEulerAngles = new Vector3(0f, heading, 0f);
+                box.transform.localScale = new Vector3(width, CaveCeiling + 1f, length);
+                volumes.Add(box.transform);
+
+                // Same box, unscaled, so the modifier's own size is the size it says it is.
+                GameObject cut = new GameObject("CaveOffMesh_" + n);
+                cut.transform.SetParent(offMesh, false);
+                cut.transform.localPosition = centre;
+                cut.transform.localEulerAngles = new Vector3(0f, heading, 0f);
+
+                NavMeshModifierVolume volume = cut.AddComponent<NavMeshModifierVolume>();
+                volume.size = new Vector3(width, CaveCeiling + 4f, length);
+                volume.center = Vector3.zero;
+                volume.area = 1;                        // Not Walkable
+            }
+        }
+
+        // On the mountain rather than on Systems: it owns no roll and no shared state, only an
+        // answer about where the rock is, so it belongs with the rock and is rebuilt with it.
+        MountainInterior interior = root.gameObject.AddComponent<MountainInterior>();
+        interior.volumes = volumes.ToArray();
+        interior.softness = CaveDarkSoftness;         // the same number the overlap above is built from
+    }
+
+    /// <summary>The mouth itself: a lintel and two shoulders, so the one way in reads as a way in.</summary>
+    static void BuildCaveMouth(Transform root)
+    {
+        Transform mouth = Group(root, "Mouth");
+        Vector3 at = CaveMouth;
+
+        // Square to the face, like everything else on this side of the map.
+        mouth.localPosition = new Vector3(at.x, 0f, at.z);
+        mouth.localEulerAngles = new Vector3(0f, 135f, 0f);
+
+        Box(mouth, "Mouth_Lintel", -5.5f, 5.5f, CaveCeiling - 1.4f, CaveCeiling + 1.2f, -1.2f, 1.2f, rockMat);
+
+        for (int i = 0; i < 9; i++)
+        {
+            float side = i % 2 == 0 ? -1f : 1f;
+            float r = Random.Range(1.6f, 3.6f);
+            Prim(mouth, "Mouth_Rock_" + i, PrimitiveType.Sphere,
+                 new Vector3(side * Random.Range(3.4f, 6.5f), GroundTop + r * 0.25f, Random.Range(-2.5f, 2.5f)),
+                 new Vector3(r, r * 0.9f, r), rockMat,
+                 new Vector3(Random.Range(-20f, 20f), Random.Range(0f, 360f), Random.Range(-20f, 20f)), false);
+        }
+    }
+
+    /// <summary>
+    /// What is left of whoever was down here last, and the one piece of writing in the place.
+    ///
+    /// The note is the whole of the puzzle's teaching and it teaches nothing directly: it is a
+    /// man's account of what he saw, and every mechanic in it is described by its effect and
+    /// never by its name. Working out that "the violet lamp" is something the store sells, and
+    /// that "a handful of anything fine enough" is the jar, is the player's job -- Nina's
+    /// drawing in the shed is the other half of it, and neither says what to do.
+    /// </summary>
+    static void BuildCaveCamp(Transform root)
+    {
+        Transform camp = Group(root, "Camp");
+        Vector3 at = Mountain(72.5f, 8.5f);
+        camp.localPosition = new Vector3(at.x, 0f, at.z);
+        camp.localEulerAngles = new Vector3(0f, 135f, 0f);
+
+        float g = GroundTop;
+
+        Box(camp, "Camp_Crate", -0.45f, 0.45f, g, g + 0.62f, -0.4f, 0.4f, plank);
+        Box(camp, "Camp_Bedroll", -1.9f, -0.7f, g, g + 0.18f, -0.9f, 0.9f, fabric, false);
+        Prim(camp, "Camp_Lamp", PrimitiveType.Sphere, new Vector3(0f, g + 0.74f, 0.2f),
+             new Vector3(0.2f, 0.24f, 0.2f), lampDead, default(Vector3), false);
+        Prim(camp, "Camp_Lamp_Base", PrimitiveType.Cylinder, new Vector3(0f, g + 0.66f, 0.2f),
+             new Vector3(0.18f, 0.05f, 0.18f), metalDark, default(Vector3), false);
+
+        for (int i = 0; i < 5; i++)
+        {
+            Prim(camp, "Camp_Ash_" + i, PrimitiveType.Cylinder,
+                 new Vector3(Random.Range(0.8f, 1.9f), g + 0.02f, Random.Range(-0.8f, 0.8f)),
+                 new Vector3(Random.Range(0.3f, 0.7f), 0.01f, Random.Range(0.3f, 0.7f)), lampDead,
+                 default(Vector3), false);
+        }
+
+        GameObject page = Prim(camp, "Camp_Note", PrimitiveType.Cube,
+                               new Vector3(-0.05f, g + 0.64f, -0.1f), new Vector3(0.24f, 0.01f, 0.3f),
+                               paint, new Vector3(0f, 18f, 0f));
+
+        Readable note = page.AddComponent<Readable>();
+        note.prompt = "Read the page";
+        note.title = "A page torn from a notebook";
+        note.text =
+            "Third time down. Halvard would not come past the first bend and I have stopped " +
+            "asking him to.\n\n" +
+            "I took the violet lamp in with me. He laughed at me for buying it and he can go " +
+            "on laughing. Under it the floor is not empty. There are marks on it. Steps, I " +
+            "think, small ones, going inward -- and none of them coming back out. They are " +
+            "there while the lamp is on them and they are gone the moment it is not, and I " +
+            "have given up trying to explain that to myself.\n\n" +
+            "I followed them as far as my nerve held. They stop at the back of the far " +
+            "gallery, where the rock is plain and flat and there is nothing there at all. " +
+            "Nothing. And yet the air moves against my hand when I hold it up to the stone, " +
+            "and it moves from somewhere.\n\n" +
+            "Halvard says a handful of anything fine enough would settle it. Chalk. Flour. " +
+            "Ash off the fire. Throw it at a thing you cannot see, he says, and it will hold " +
+            "the shape of it for you. I had nothing fine enough left in my pack and I was not " +
+            "going back down a fourth time to find out.\n\n" +
+            "Going up for air. If I do not write again it is because I went back down.";
+    }
+
+    /// <summary>
+    /// The marks. Bare feet, small, going inward -- painted in the same ultraviolet as the
+    /// trail outside, so a player who has met one already knows what they are looking at.
+    ///
+    /// They lead from the camp to the back wall of the far gallery and stop there. Nothing
+    /// marks the wall itself: the marks running out at a blank face IS the clue, and a cross
+    /// daubed on the stone would do the powder's job for it.
+    /// </summary>
+    static void BuildCaveTrail(Transform root)
+    {
+        Transform trail = Group(root, "UVTrail");
+
+        const float spacing = 2.4f;
+        float carried = 0f;
+        int n = 0;
+
+        for (int i = 0; i < CaveTrail.Length - 1; i++)
+        {
+            Vector2 a = CaveTrail[i], b = CaveTrail[i + 1];
+            float length = Vector2.Distance(a, b);
+            if (length < 0.01f) continue;
+
+            for (float d = carried; d < length; d += spacing, n++)
+            {
+                Vector2 st = Vector2.Lerp(a, b, d / length);
+                Vector3 at = Mountain(st.x, st.y);
+
+                Vector2 step = (b - a) / length;
+                Vector3 ahead = Mountain(st.x + step.x, st.y + step.y) - at;
+
+                Transform foot = Group(trail, "Step_" + n);
+                foot.localPosition = new Vector3(at.x, GroundTop + 0.02f, at.z);
+                foot.localEulerAngles = new Vector3(0f,
+                    Mathf.Atan2(ahead.x, ahead.z) * Mathf.Rad2Deg + Random.Range(-10f, 10f), 0f);
+
+                // Left, right, left: a walk, not a dotted line.
+                float side = (n % 2 == 0 ? -0.24f : 0.24f);
+                Prim(foot, "Sole", PrimitiveType.Cube, new Vector3(side, 0f, 0.04f),
+                     new Vector3(0.09f, 0.012f, 0.17f), paint, default(Vector3), false);
+                Prim(foot, "Heel", PrimitiveType.Cube, new Vector3(side, 0f, -0.09f),
+                     new Vector3(0.075f, 0.012f, 0.07f), paint, default(Vector3), false);
+
+                foot.gameObject.AddComponent<UVRevealed>();
+            }
+
+            carried = (carried - length) % spacing;
+            if (carried < 0f) carried += spacing;
+        }
+    }
+
+    /// <summary>
+    /// The back wall of the far gallery, and the fact that it is not a wall.
+    ///
+    /// While it is concealed, what stands in the opening is <c>Door_Plug</c>: a slab of the
+    /// same rock as the gallery, flush with the wall around it and solid. That is the point --
+    /// hiding the door by switching its renderers off would leave a corridor running on into
+    /// the dark for anyone to see, and switching its colliders off would let them walk through
+    /// the mountain. <see cref="Concealed"/> swaps the two over when the powder lands.
+    ///
+    /// The surround is never swapped: it is ordinary rock with a door-shaped hole in it, so
+    /// the moment the plug goes there is a doorway rather than a ragged gap.
+    /// </summary>
+    static void BuildHiddenDoor(Transform root)
+    {
+        Transform site = Group(root, "HiddenDoor");
+
+        Vector3 at = Mountain(MountainDoorS, MountainDoorT);
+
+        // Facing along the passage it blocks, so the leaf swings back into the gallery.
+        Vector3 along = Mountain(120f, -8f) - Mountain(110f, -16f);
+        site.localPosition = new Vector3(at.x, 0f, at.z);
+        site.localEulerAngles = new Vector3(0f, Mathf.Atan2(along.x, along.z) * Mathf.Rad2Deg, 0f);
+
+        const float gapHalf = 1.25f;
+        const float gapTop = 2.65f;
+
+        // Rock with a hole in it, and the hole is the only way past it.
+        //
+        // It reaches 14 m to either side, which is far more than the passage is wide -- and
+        // that width is the whole point rather than sloppiness. The far gallery is a carved
+        // blob, not a tube, so the open floor at this plane is several metres wider than the
+        // passage that leaves it; a wall that only spanned the passage would leave floor to
+        // walk round its ends, and the vault would be reachable with no powder at all. It was,
+        // the first time. Everything past the doorway is buried in the mass, so the cost of
+        // being generous here is nothing.
+        //
+        // It is deliberately a SIBLING of the door rather than a child of it. The powder finds
+        // what it has landed near by looking up the hierarchy from whatever it touched, so a
+        // fourteen-metre wall parented under the door would make every inch of the back of the
+        // gallery a place to find it. Out here the wall is only rock, and the door is found by
+        // pouring at the door.
+        Transform surround = Group(root, "DoorWall");
+        surround.localPosition = site.localPosition;
+        surround.localRotation = site.localRotation;
+        Box(surround, "Wall_W", -14f, -gapHalf, -2f, CaveCeiling + 2f, -0.6f, 0.6f, rockMat);
+        Box(surround, "Wall_E", gapHalf, 14f, -2f, CaveCeiling + 2f, -0.6f, 0.6f, rockMat);
+        Box(surround, "Wall_Top", -gapHalf, gapHalf, gapTop, CaveCeiling + 2f, -0.6f, 0.6f, rockMat);
+
+        // The lie.
+        GameObject plug = Box(site, "Door_Plug", -gapHalf - 0.05f, gapHalf + 0.05f, GroundTop, gapTop + 0.05f,
+                              -0.4f, 0.4f, rockMat);
+
+        // What is really there.
+        Transform frame = Group(site, "Frame");
+        Box(frame, "Jamb_W", -gapHalf, -gapHalf + 0.16f, GroundTop, gapTop, -0.2f, 0.2f, metalDark);
+        Box(frame, "Jamb_E", gapHalf - 0.16f, gapHalf, GroundTop, gapTop, -0.2f, 0.2f, metalDark);
+        Box(frame, "Lintel", -gapHalf, gapHalf, gapTop - 0.16f, gapTop, -0.2f, 0.2f, metalDark);
+
+        Transform hinge = Group(site, "Door_Hinge");
+        hinge.localPosition = new Vector3(-gapHalf + 0.16f, 0f, 0f);
+        Box(hinge, "Door_Leaf", 0.02f, 2.2f, GroundTop, gapTop - 0.18f, -0.07f, 0.07f, wood);
+        Box(hinge, "Door_Band", 0.02f, 2.2f, 1.6f, 1.78f, -0.09f, 0.09f, metalDark);
+        Box(hinge, "Door_Handle", 1.86f, 2.06f, 1.15f, 1.35f, -0.13f, 0.13f, metalPale);
+
+        DoorInteraction door = hinge.gameObject.AddComponent<DoorInteraction>();
+        door.openAngle = 96f;
+        door.canBeForced = false;                    // nothing on this side to force it
+
+        // What the powder's overlap search actually hits. A trigger, and never switched off:
+        // a thing that cannot be found cannot be revealed. Reaches out into the gallery so the
+        // dust does not have to land on the exact centimetre of stone.
+        GameObject probe = new GameObject("Door_Volume");
+        probe.transform.SetParent(site, false);
+        probe.transform.localPosition = new Vector3(0f, 1.4f, -1.2f);
+        BoxCollider probeBox = probe.AddComponent<BoxCollider>();
+        probeBox.size = new Vector3(3.6f, 2.8f, 2.6f);
+        probeBox.isTrigger = true;
+
+        Concealed concealed = site.gameObject.AddComponent<Concealed>();
+        concealed.probeVolume = probeBox;
+        concealed.disguise = plug.GetComponentsInChildren<Renderer>();
+        concealed.disguiseSolids = plug.GetComponentsInChildren<Collider>();
+        concealed.dormant = new Behaviour[] { door };
+
+        List<Renderer> hidden = new List<Renderer>();
+        hidden.AddRange(frame.GetComponentsInChildren<Renderer>());
+        hidden.AddRange(hinge.GetComponentsInChildren<Renderer>());
+        concealed.hidden = hidden.ToArray();
+
+        // The door's own colliders go with it, and the doorway stays solid anyway because the
+        // plug is what is filling it. Leaving them live would put an interactable with a live
+        // collider inside a wall the player is not supposed to know about: the plug happens to
+        // block the line-of-sight check today, but a prompt that only stays hidden because one
+        // box is 33 cm in front of another is a trap. Once revealed, DoorInteraction takes them
+        // over on its first Update.
+        List<Collider> solids = new List<Collider>();
+        solids.AddRange(frame.GetComponentsInChildren<Collider>());
+        solids.AddRange(hinge.GetComponentsInChildren<Collider>());
+        concealed.solids = solids.ToArray();
+
+        BuildVault(root);
+    }
+
+    /// <summary>
+    /// What is behind it. A dead man's cache: fuel, which is the only thing in this level that
+    /// is really time, and the spots the loot table may put its dearest piece on.
+    ///
+    /// **Nothing here is guaranteed to be worth money.** The cache is worth the walk on its own
+    /// and the rest is the same draw as anywhere else, only weighted deeper -- a vault that
+    /// always held the television would turn the whole discovery into a route to run every
+    /// night, which is exactly what this level was rebuilt to stop being.
+    /// </summary>
+    static void BuildVault(Transform root)
+    {
+        Transform vault = Group(root, "Vault");
+        Vector3 at = Mountain(120f, -8f);
+        vault.localPosition = new Vector3(at.x, 0f, at.z);
+        vault.localEulerAngles = new Vector3(0f, 135f, 0f);
+
+        float g = GroundTop;
+
+        Box(vault, "Vault_Crate_A", -2.2f, -1.1f, g, g + 0.8f, 0.6f, 1.7f, plank);
+        Box(vault, "Vault_Crate_B", -2.0f, -1.2f, g + 0.8f, g + 1.4f, 0.8f, 1.6f, plank);
+        Box(vault, "Vault_Shelf", 1.2f, 2.6f, g + 0.9f, g + 1.0f, -1.4f, -0.5f, plank);
+
+        for (int i = 0; i < 7; i++)
+        {
+            float r = Random.Range(0.3f, 0.9f);
+            Prim(vault, "Vault_Rubble_" + i, PrimitiveType.Sphere,
+                 new Vector3(Random.Range(-2.5f, 2.5f), g + r * 0.2f, Random.Range(-2.5f, 2.5f)),
+                 new Vector3(r, r * 0.7f, r), rockMat,
+                 new Vector3(0f, Random.Range(0f, 360f), 0f), false);
+        }
+
+        // The cache. Instantiated from the store's own can, so there is one fuel can in the
+        // game and this is not a second copy of it.
+        GameObject canPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Store/FuelCan.prefab");
+        if (canPrefab == null)
+        {
+            Debug.LogWarning("No FuelCan prefab to stock the mountain cache with; the vault is empty.");
+            return;
+        }
+
+        Transform cache = Group(vault, "Cache");
+
+        // Carryables never carve the NavMesh, the same rule every other one in the level follows.
+        cache.gameObject.AddComponent<NavMeshModifier>().ignoreFromBuild = true;
+
+        for (int i = 0; i < 2; i++)
+        {
+            GameObject can = (GameObject)PrefabUtility.InstantiatePrefab(canPrefab, cache);
+            can.name = "FuelCan_Cache_" + i;
+            can.transform.localPosition = new Vector3(-0.2f + i * 0.75f, g + 0.28f, -1.4f);
+            can.transform.localRotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+        }
+    }
+
+    /// <summary>
+    /// Where loot may be put inside the mountain, as discs on the cave's own centreline.
+    ///
+    /// <see cref="LootSpawnPointBuilder"/> samples these exactly as it samples the rings out in
+    /// the woods, and every candidate goes through the same probe, so a spot in here is a spot
+    /// by the same definition as a spot on the kitchen floor. The two numbers that make the
+    /// mountain worth the walk are the caps -- thin, and thinner the deeper you go -- and the
+    /// extra depth, which only decides WHICH of the run's pieces lands here and never whether
+    /// there is one at all.
+    /// </summary>
+    public static void CaveLootRegions(List<CaveRegion> into)
+    {
+        into.Add(new CaveRegion("CaveMouth",   Mountain(52f, 21f),    7f,  4f,  2));
+        into.Add(new CaveRegion("CavePassage", Mountain(62f, 15f),    8f,  10f, 3));
+        into.Add(new CaveRegion("CaveMain",    Mountain(74f, 6f),     10f, 14f, 6));
+        into.Add(new CaveRegion("CaveGallery", Mountain(85f, 25f),    8f,  22f, 3));
+        into.Add(new CaveRegion("CaveHollow",  Mountain(76f, -18f),   6f,  22f, 3));
+        into.Add(new CaveRegion("CaveDeep",    Mountain(97f, -11f),   8f,  30f, 3));
+        into.Add(new CaveRegion("CaveFar",     Mountain(110f, -16f),  9f,  34f, 3));
+        into.Add(new CaveRegion("CaveVault",   Mountain(120f, -8f),   6f,  48f, 5));
+    }
+
+    /// <summary>A place inside the mountain loot may be sampled from, and how deep it counts as.</summary>
+    public struct CaveRegion
+    {
+        public readonly string label;
+        public readonly Vector3 centre;
+        public readonly float radius;
+        public readonly float extraDepth;
+        public readonly int cap;
+
+        public CaveRegion(string label, Vector3 centre, float radius, float extraDepth, int cap)
+        {
+            this.label = label;
+            this.centre = centre;
+            this.radius = radius;
+            this.extraDepth = extraDepth;
+            this.cap = cap;
+        }
     }
 
     // ----------------------------------------------------------------- props
@@ -1522,6 +2185,14 @@ public static class PrototypeEnvironmentBuilder
         dark.centre = generator.transform;
         dark.avoid = level2 != null ? level2.transform : null;
 
+        // Named, not rolled. The mountain is built into the south-east corner and cannot move
+        // between runs, so the dark cannot either: what used to be a quarter of the woods you
+        // needed a bought flashlight for is now the approach to the rock, and the darkness is
+        // what makes the mouth of it something you come upon rather than something you see
+        // from the treeline. Level2Site is what keeps the UV trail out of it now -- it asks
+        // DarkQuarter.DistanceFromDark, which is only safe to ask BECAUSE the corner is named.
+        dark.fixedCorner = DarkQuarter.Quarter.SouthEast;
+
         // The four quarters meet where the ground is centred, and the gizmo is drawn to its edge.
         dark.mapCentre = Vector3.zero;
         dark.mapHalf = GroundHalf;
@@ -1549,6 +2220,12 @@ public static class PrototypeEnvironmentBuilder
             // the same for a walk to the garage as for a walk to the far house.
             loot.shallowRadius = 22f;
             loot.deepRadius = 90f;
+
+            // The mountain added a region of its own, so the draw is widened to match rather
+            // than quietly thinning the woods out to pay for it. Not balanced yet: retune this
+            // against a playtest and against the haul, never on its own.
+            loot.minItems = 7;
+            loot.maxItems = 11;
         }
 
         MonsterSpawner spawner = systems.GetComponent<MonsterSpawner>();

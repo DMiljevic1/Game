@@ -51,6 +51,10 @@ public static class LootSpawnPointBuilder
     // points at all -- and the far field is most of the reason to leave the house.
     const int   HouseCap = 40;
 
+    // Samples per point the cave regions are allowed. High because a disc drawn over a passage
+    // is mostly the rock on either side of it.
+    const int   CaveTriesPerPoint = 40;
+
     // A surface higher than this is a shelf, not somewhere you stand a television.
     const float LargeItemMaxSurfaceHeight = 1.0f;
 
@@ -102,21 +106,58 @@ public static class LootSpawnPointBuilder
         int yard = AddRing(spawner, root.transform, accepted, Vector3.zero, YardInner, YardOuter, YardTries, YardCap, "Yard");
         int field = AddRing(spawner, root.transform, accepted, Vector3.zero, FieldInner, FieldOuter, FieldTries, FieldCap, "Field");
         int deep = AddRing(spawner, root.transform, accepted, Vector3.zero, DeepInner, DeepOuter, DeepTries, DeepCap, "Deep");
-
+        int cave = AddCave(spawner, root.transform, accepted);
 
         Random.state = restore;
 
         if (temporary != null) Object.DestroyImmediate(temporary);
 
-        int total = indoor + yard + field + deep;
+        int total = indoor + yard + field + deep + cave;
         if (total == 0)
         {
             Debug.LogError("No valid loot spawn points were found at all -- is the environment built?");
             return;
         }
 
-        Debug.Log(string.Format("Loot spawn points rebuilt: {0} total ({1} house, {2} yard, {3} field, {4} deep).",
-                                total, indoor, yard, field, deep));
+        Debug.Log(string.Format("Loot spawn points rebuilt: {0} total ({1} house, {2} yard, {3} field, {4} deep, {5} mountain).",
+                                total, indoor, yard, field, deep, cave));
+    }
+
+    /// <summary>
+    /// Inside the mountain, region by region, off the same centreline the cave is carved from
+    /// -- so the two can never describe different caves and a rebuilt cave never leaves points
+    /// standing in its new rock.
+    ///
+    /// The caps are deliberately thin, and thinnest deep in: the mountain is meant to pay
+    /// better per piece than the woods, not to hold more of them. Most of it is empty on any
+    /// given night, which is the only thing that keeps it worth walking into rather than
+    /// worth farming.
+    /// </summary>
+    static int AddCave(LootSpawner spawner, Transform parent, List<Vector3> accepted)
+    {
+        List<PrototypeEnvironmentBuilder.CaveRegion> regions = new List<PrototypeEnvironmentBuilder.CaveRegion>();
+        PrototypeEnvironmentBuilder.CaveLootRegions(regions);
+
+        int made = 0;
+
+        foreach (PrototypeEnvironmentBuilder.CaveRegion region in regions)
+        {
+            int here = 0;
+
+            // Generously many tries: most of a disc drawn over a passage is the rock beside it,
+            // and the probe is what decides which is which.
+            for (int i = 0; i < CaveTriesPerPoint * region.cap && here < region.cap; i++)
+            {
+                Vector2 offset = Random.insideUnitCircle * region.radius;
+                Vector3 candidate = region.centre + new Vector3(offset.x, 0f, offset.y);
+
+                if (TryAdd(spawner, parent, accepted, candidate, region.label, here + 1, region.extraDepth)) here++;
+            }
+
+            made += here;
+        }
+
+        return made;
     }
 
     // ------------------------------------------------------------------- regions
@@ -166,7 +207,7 @@ public static class LootSpawnPointBuilder
     // --------------------------------------------------------------------- point
 
     static bool TryAdd(LootSpawner spawner, Transform parent, List<Vector3> accepted,
-                       Vector3 candidate, string label, int index)
+                       Vector3 candidate, string label, int index, float extraDepth = 0f)
     {
         Vector3 surface;
         if (!spawner.TryResolveSurface(candidate, out surface)) return false;
@@ -180,6 +221,7 @@ public static class LootSpawnPointBuilder
 
         // A television belongs on the floor or a table, not balanced on a high shelf.
         point.allowLargeItems = surface.y <= LargeItemMaxSurfaceHeight;
+        point.extraDepth = extraDepth;
 
         accepted.Add(surface);
         return true;
