@@ -162,9 +162,9 @@ at a blank wall → a door → what he was looking for.**
 - **The note never names a mechanic.** It is a man's account — "the violet lamp", marks "there while
   the lamp is on them and gone the moment it is not", a wall where "the air moves against my hand",
   and a friend who says "a handful of anything fine enough would settle it. Chalk. Flour. Ash."
-  Working out that those are two things the store sells is the player's job. **Nina's drawing in the
-  shed is the other half of it** and neither is ever phrased as an instruction. Nothing gates on
-  either: a player who has already met the Level 2 trail needs no note at all.
+  Working out that those are two things the store sells is the player's job, and this note is now
+  **the only place in the level that hints at either tool** — it is never phrased as an instruction.
+  Nothing gates on it: a player who has already met the Level 2 trail needs no note at all.
 - **`Concealed` hides by swapping, not by switching off.** `UVRevealed`'s trick — renderers off —
   cannot work for a door set into rock: switch its renderers off and you are looking down a corridor
   that carries on into the dark, which gives the secret away to anyone who walks up to it; switch
@@ -216,9 +216,9 @@ in UI. `Wallet.HasAuthority` is the pattern — a seam that becomes `IsServer` w
 The progression, end to end. Each arrow is an object in the world, not a quest stage:
 
 **find 4 `KeyFragment`s in the woods → fit them into the `KeyMaker` on the kitchen table → it makes
-the `CompleteKey` → buy the `UVFlashlight` → find the UV footprints out in the forest → follow them
-to the `RevealCircle` → scatter `MagicPowder` on it → the `Level2Door` appears → unlock it with the
-key → it opens, level complete.**
+the `CompleteKey` → buy the `UVFlashlight` → find the blood trail leaving the yard → follow it out
+into the forest to the pool of blood → scatter `MagicPowder` on it → the `Level2Door` appears →
+unlock it with the key → it opens, level complete.**
 
 No markers, no objective list, no timer. The only readout in the whole chain is the key maker's
 `n/4`, because that is the one number the player genuinely cannot infer from looking at things.
@@ -230,7 +230,7 @@ No markers, no objective list, no timer. The only readout in the whole chain is 
 | Turning four pieces into one key | `KeyMaker` (`IInteractable`, **E**) | `House/Furniture/Kitchen/KitchenTable/KeyMaker` |
 | The finished key | `CompleteKey` (a `Carryable`) | `Prefabs/Objective/CompleteKey.prefab`, made by the `KeyMaker` and **nowhere else** |
 | Seeing ultraviolet | `UVFlashlight : Flashlight` | `Prefabs/Store/UVFlashlight.prefab`, store stock |
-| Being invisible until UV hits it | `UVRevealed` (pure observer) | every footprint, and the circle |
+| Being invisible until UV hits it | `UVRevealed` (pure observer) | every drop of blood, and the pool |
 | Probing for hidden things | `MagicPowder` (a `Carryable`, **left mouse**) + `PowderPatch` | store stock |
 | The ending | `Level2Door` (`IInteractable`, **E**) | `Props/Level2Site/Level2Door` |
 | Swinging the whole trail onto a new bearing each run | `Level2Site` (authority) | `Props/Level2Site` |
@@ -251,7 +251,11 @@ No markers, no objective list, no timer. The only readout in the whole chain is 
 - **`CompleteKey` has exactly one source.** It is in no loot table, no store stock and nowhere in
   the scene — `KeyMaker.MakeKey` is the only thing that instantiates it. Keep it that way.
 
-#### The UV trail
+#### The blood trail
+
+Somebody bled their way out of the yard and into the woods, and the pool where they stopped is
+where the door is. It is the same `UVRevealed` machinery it always was, re-skinned — 25 `Drip_n`
+stations of spatter and smears, then `BloodPool`, all under `Props/Level2Site`.
 
 - **`UVFlashlight` is a `Flashlight` subclass and adds one thing: a registry of lit beams.** Pickup,
   carrying, the **X** key, going dark while stowed — all inherited, none restated.
@@ -259,27 +263,81 @@ No markers, no objective list, no timer. The only readout in the whole chain is 
   revealed is exactly what the player sees lit. Retuning the light retunes the reveal for free and
   the two can never drift apart.
 - `UVRevealed` switches renderers and **nothing else** — no objective state, no idea what it is part
-  of. That is what lets the same component serve the footprints, the circle, and whatever is worth
-  hiding next. `AnyLit` is the static early-out so the no-flashlight case costs one check per mark.
+  of. That is what lets the same component serve the drops, the pool, the cave's marks, and whatever
+  is worth hiding next. `AnyLit` is the static early-out so the no-flashlight case costs one check
+  per mark.
 - `linger` (0.35 s) stops a mark flickering out the instant the player's aim drifts off it.
-- **The trail's bearing is rolled every run.** The builder lays it out along local **+z** from 40 m
+- **`Env_Blood` emits, and that is not decoration.** Every UV mark used to be `Env_Paint` — a dull
+  grey (0.42, 0.41, 0.37) with no emission, lit only by the violet lamp against near-black ground at
+  night, which is to say invisible *even when the reveal was working perfectly*. The reveal was
+  never broken; finding a mark simply bought you nothing you could see. Emission is what makes a
+  revealed mark read as fluorescing. It is **(5.2, 0.23, 0.40)**, which looks absurd next to
+  `Light_WarmBulb`'s 3.2 until you remember these are 6 mm-thick decals on unlit ground — judge it
+  from a capture in play, never from the swatch. It costs nothing while hidden, because `UVRevealed`
+  switches the *renderer* off and not the material.
+- **The trail's bearing is rolled every run.** The builder lays it out along local **+z** from 12 m
   to 90 m; `Level2Site` rotates the root about the house at `Start`, rejecting bearings that would
   bury the door, then ground-snaps every mark. A fixed trail is learned once and walked straight to
-  — the exact failure this level was rebuilt to avoid.
+  — the exact failure this level was rebuilt to avoid. Measured over 120 bearings after the change:
+  **74% are clear** (it was 47%), average 2.9 marks lost of 27, worst case 13.
+- **It starts 12 m out — at the edge of the yard, not forty metres into the trees.** Forty was the
+  original rule ("you have to already be exploring before there is anything to find") and it did not
+  survive playtest: a half-metre-wide line somewhere on a 250 m circle, hunted at night with an 18 m
+  lamp, is a lottery and not exploration. **The trail was never the content; following it seventy
+  metres into the dark is.** So the lamp is what you buy to pick the trail up outside the front door,
+  and the woods are still where it goes. Don't put the start back out at 40.
+- **The drops grow and multiply towards the pool** (`t` from `InverseLerp`, 2 → 5 drops a station,
+  sizes scaling with it, an occasional `Smear` where they went down). That is the only thing telling
+  the player which way along the line is *onward*, and it does it without a marker or a prompt.
+- **Size is the whole difference between a findable trail and an invisible one, and it was
+  measured in play.** The first version's drops came out **6 cm across** — 0.3° of view at 12 m,
+  about five pixels — so a player had to stand within two or three metres of one to see it, on a
+  trail whose bearing moves every run. The reveal was working perfectly the entire time; there was
+  simply nothing big enough to notice. Now every station carries a mark of **0.51–2.61 m**
+  (avg 1.40), measured **2.5°–9.5° of view** with six stations lit at once across 7–22 m. Never
+  shrink these back; if the trail ever feels wrong again, measure apparent size in play before
+  touching the reveal.
+- **In the Scene view the marks are buried, and that is not a bug.** The stations are authored at
+  world y = 0.020 and `Ground`'s surface is y = 0.040, so in edit mode they sit *inside* the ground
+  cube; the authored y is really "lift above whatever ground I land on", which `SitOnGround` applies
+  at run time to put them at y = 0.060. It does mean **the trail cannot be judged from edit mode at
+  all** — which is how it shipped twice unverified. Check it in play.
+- **The bearing moves every run, so "it was there last time" is never a symptom.** `Level2Site`
+  re-rolls it in `Start`; runs measured 330°, 49°, 203°, 266°. A player who walks the same way
+  twice will find nothing the second time, and that is the design working, not a fault.
+- **`Level2Site.fixedBearing` pins the trail while testing. It is currently set to 195°**, which
+  puts the first mark 7.9 m from where the player spawns. Negative restores the roll, which is the
+  shipping behaviour — set it back before judging how the level actually plays. A pinned bearing
+  still has to pass the same checks as a rolled one (a fixed bearing that buried the door would be
+  worse, not better), and a refusal logs and falls through to the roll. Measured over 15° steps:
+  **due south, south-east and east are blocked** by the door's own spot and by marks that cannot
+  reach ground; north, west and north-west are clear.
+- **`Level2Site.logBearing` prints which way it went**, e.g. *"Blood trail runs west from the house
+  this run (266°)"*. Same reasoning as `DarkQuarter.logChoice`: a rolled thing that leaves no trace
+  is indistinguishable from a broken one, and a tester needs to tell those apart. It is a
+  `LogWarning` rather than a `Log` purely so it cannot be scrolled past — clear the flag when the
+  level stops being worked on. It is **console only and must stay that way**: putting the bearing
+  on the HUD would be the objective marker this level exists without.
 - **The marks are nudged clear of trunks, and the door's spot is checked properly.** The bearing is
-  rolled *after* the forest exists, so a footprint can come down inside a tree — and a buried mark on
-  a trail of eighteen is a gap in the only thread the player has. `SitOnGround` accepts a spot only
-  when the ray lands on `Ground` itself, and otherwise steps the mark round a small spiral of
-  `nudgeRadius`. Measured over 100 bearings: **6.3% of marks land on something, 100% of those are
-  rescued, none end up buried.**
+  rolled *after* the forest exists, so a drop can come down inside a tree. `SitOnGround` accepts a
+  spot only when the ray lands on `Ground` itself, and otherwise steps the mark round a small spiral
+  of `nudgeRadius`.
+- **`lostMarksAllowed` is 5, wired by the builder**, not the field's default of 2. The trail is
+  nearly twice as long as it was and its first few metres cross the yard, where the shed, the wreck
+  and the lamps stand, so losing three or four drops to a prop is ordinary now rather than a sign
+  the bearing points into rock. With drops this dense a handful of gaps is not a gap in the thread.
 - **`DoorSpotClear` filters the site's own colliders explicitly** rather than trusting that
   `Level2Door.Awake` has already switched them off. That ordering does hold (every `Awake` precedes
   every `Start`), but a check that silently depends on execution order is a trap — and this one
   would fail *closed*, rejecting every bearing in the level and falling back to the authored one
-  without anyone noticing. Measured: **a clear bearing is found on 100% of runs, worst case 5 of 40
-  attempts.**
-- **It starts 40 m out, not at the door.** You have to already be exploring with the flashlight on before
-  there is anything to find.
+  without anyone noticing.
+- **The UV lamp was widened to match** (`Prefabs/Store/UVFlashlight.prefab`): range 18 → **24 m**,
+  spot 26° → **32°** (inner 24°), intensity 45 → **110 lm**. At 18 m / 26° a sweep lit a disc barely
+  8 m across at its far end. The lumens go up with the cone and the range for the reason in *The
+  store* — a wider beam is a dimmer one unless they do. It is still shorter and narrower than the
+  plain flashlight (32 m / 42°), so it stays the specialist tool rather than an upgrade.
+- **The cave's marks are the same blood**, for continuity and for the same visibility reason — a
+  grey sole under a violet lamp in a pitch-dark cave was invisible too.
 
 #### The door
 
@@ -312,15 +370,16 @@ No markers, no objective list, no timer. The only readout in the whole chain is 
   within reach that offers itself up through that interface, and tells it — so the mountain's hidden
   door needed no change to the jar at all, and the next hidden thing will not either. Whatever
   implements it needs a collider the overlap search can hit **while the thing is still hidden**: a
-  trigger volume is the usual answer (the circle's `Circle_Volume`, `Concealed.probeVolume`).
+  trigger volume is the usual answer (the pool's `Pool_Volume`, `Concealed.probeVolume`).
 - **`RevealCircle` is found, not used — it is not an `IInteractable` at all.** There is no prompt
-  and no key on it, because a circle that announced itself would give the door away to anyone who
+  and no key on it, because a pool that announced itself would give the door away to anyone who
   walked past without a UV flashlight. The pour does an `OverlapSphere` and asks whatever is in
   reach whether it wants revealing, so the next hidden thing only has to offer itself the same way.
+  It still carries its old name: it is the *component*, and what it sits on is now the blood pool.
 - Its volume is a **trigger**: a solid box would be an invisible wall in the middle of the woods,
   and the pour's overlap passes `QueryTriggerInteraction.Collide`.
-- `revealRadius` (**3.5 m**) is deliberately wider than the circle. Hunting a 3 m circle with a 3 m
-  probe would be miserable; the UV trail is what narrows the search, not the powder.
+- `revealRadius` (**3.5 m**) is deliberately wider than the pool. Hunting a 3 m pool with a 3 m
+  probe would be miserable; the blood trail is what narrows the search, not the powder.
 - **Left mouse is routed, never read with `Input`.** `MagicPowder` declares it from `GetOptions`
   while `IsHeld`, exactly as `Flashlight` declares **X**, so the one-router rule holds.
 - **It stands down while the store is open** (`Store.IsAnyOpen`). The store is the only place in the
@@ -350,14 +409,13 @@ reintroduces a fixed objective location — an authored hiding place, a landmark
 piece, a track that leads to one — brings that failure straight back.
 
 What deliberately stayed: the forest and its tracks, the house, the generator, the shed, the well,
-the wreck, the notice by the door and Nina's drawing in the shed.
+the wreck and the notice by the door.
 
-- **Nina's drawing in the shed is where the two tools are explained**, and it is the only place.
-  It says it as a child describing a game she made up — a purple lamp with glowing footprints
-  under it ("THE PURPLE LIGHT SHOWS WHERE THINGS WENT") and a stick girl tipping a jar over a door
-  drawn in heavy crayon ("THE DUST SHOWS WHAT IS STILL THERE"). **UV flashlight → invisible
-  traces; magic powder → invisible objects.** Never phrase it as a tutorial: the player should
-  work out that she is describing the two store items, not be told. Optional — nothing gates on it.
+- **Nina's drawing in the shed is gone.** It used to be the second place the two tools were
+  hinted at, pinned inside the shed behind the house. The cave camp's note now says the same
+  things in the same indirect way, and one sheet of paper behind the base saying what a page in
+  the mountain already says is a duplicate, not a second chance. `Mountain/Camp/Camp_Note` is the
+  only hint at either tool. Don't put another readable by the house.
 
 - **The tracks lead nowhere on purpose.** They are something to navigate by, never a route to
   anything; nothing is placed at their ends. A track that ended at a fragment would be a marker.
@@ -1031,17 +1089,25 @@ lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
 | Item | Price | What it is |
 |---|---|---|
 | Flashlight | 60 | The existing `Flashlight`: beam range 32, spot 42°, intensity 70 |
-| Better Flashlight | 180 | The same script, stronger beam: range **55**, spot **58°**, intensity **160**, whiter |
+| Better Flashlight | 180 | The same script, a beam that is genuinely brighter: range **70**, spot **60°** (inner **34°**), intensity **520 lm**, whiter |
 | Shovel | 90 | A plain `Carryable`. No behaviour yet — the gameplay comes later |
 | Adrenaline | **the next revive price** (500 → 750 → 1,100 → 1,500 …) | `Adrenaline` prices itself through `IStorePriced`; see *Death and revive* |
 | Fuel can | **50** | A detached copy of the scene cans (`FuelCan`, 40 fuel = 160 s). The only fuel once the four placed cans are used |
-| UV flashlight | **500** | `UVFlashlight`, a `Flashlight` subclass. Deep violet beam, narrower and shorter than the plain flashlight, and it is the **only** way to see the footprints or the circle |
-| Magic powder | **200** | `MagicPowder`. **Infinite** — bought once, used forever. Left mouse tips the jar; scatter it anywhere to test for hidden things, and on the `RevealCircle` it brings the Level 2 door into the world |
+| UV flashlight | **500** | `UVFlashlight`, a `Flashlight` subclass. Deep violet beam (24 m, 32°, 110 lm) — narrower and shorter than the plain flashlight, and the **only** way to see the blood trail or the pool |
+| Magic powder | **200** | `MagicPowder`. **Infinite** — bought once, used forever. Left mouse tips the jar; scatter it anywhere to test for hidden things, and on the pool of blood it brings the Level 2 door into the world |
 
 - `StoreItem.CurrentPrice` is what is shown and charged, never `price` directly. A prefab that
   implements `IStorePriced` works its own price out; everything else uses the listed number.
   `TryBuy` reads the price **once, before spawning**, because Adrenaline is dearer the moment it exists.
 
+- **Light intensity here is in lumens (`m_LightUnit` 1), so a wider cone is a dimmer one.** This is
+  what made the better flashlight feel identical to the plain one: 160 lm spread over 58° is only
+  ~1.2× the plain lamp's 70 lm over 42° per unit area. Widening a beam without raising the lumens
+  to match buys nothing. Compare the two as lumens ÷ cone solid angle, never as raw `intensity`.
+- **Every flashlight is called a "flashlight".** `itemName` on the two store prefabs used to read
+  `torch` / `heavy-duty torch`, which is the word the carrying line and the pickup prompt show — and
+  the only place in the game that word appeared. The mesh objects inside the prefabs are still named
+  `Torch_*`; those are never seen by the player.
 - **The flashlight is store-only and no longer lies on the house floor.** The `Flashlight` scene root was
   removed when the store was added; buying one is how a run gets a light. Don't re-place one by hand.
 - Every store prefab sets `NavMeshModifier.ignoreFromBuild`, like every other carryable, so a dropped
@@ -1222,9 +1288,9 @@ still feels like night; the deeper into the woods, the darker, until the flashli
   indistinguishable, because the woods out there are already near-black and ambient has nothing
   left to take. The band that still reads by moonlight — roughly 25–55 m — is the only band
   worth darkening, so never push `fullRadius` back out.
-- **A line of eighteen barely-visible footprints hidden in the darkest part of the map would
-  make the only thread the player has a matter of luck** — that is why the trail check exists
-  at all, and why it is a strike-out rather than a retry.
+- **A line of twenty-five barely-visible drops of blood hidden in the darkest part of the map
+  would make the only thread the player has a matter of luck** — that is why the trail check
+  exists at all, and why it is a strike-out rather than a retry.
 - **The corner is drawn on the first frame, not in `Start`.** `Level2Site` rolls the trail's
   bearing in *its* `Start`, and the order of two `Start`s is undefined — so `DarkQuarter`
   chooses lazily, the first time anything asks `Corner` or `Weight`, by which point the trail
@@ -1288,7 +1354,13 @@ texture, so a panel costs no allocation per frame.
 
 ## Don't
 
-- Enter or exit Play mode, or trigger a build, unless asked.
+- Trigger a build, unless asked.
+
+**Play mode is always allowed, and is the expected way to verify gameplay.** Anything that only
+exists while the game runs — `Awake`/`OnEnable` registries, `UVFlashlight.AnyLit`, `Level2Site`'s
+rolled bearing, a monster's state machine — cannot be checked from edit mode, and guessing at it
+from the Inspector has cost real time. Enter Play mode, look, and exit; leave the Editor out of
+Play mode when you are done and never save the scene while it is running.
 - Reformat or restructure files you weren't asked to touch.
 - Add packages to `Packages/manifest.json` without asking.
 - Delete assets or scene objects that weren't part of the request.

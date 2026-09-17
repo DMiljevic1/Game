@@ -30,6 +30,15 @@ public class Level2Site : MonoBehaviour
     [Tooltip("How far above the sampled point the ground is searched for.")]
     public float probeHeight = 40f;
 
+    [Tooltip("Print which way the trail runs when the level starts. The bearing is re-rolled " +
+             "every run, so without this there is no way to know but to walk a full circle.")]
+    public bool logBearing = true;
+
+    [Tooltip("Negative rolls a fresh bearing every run, which is the shipping behaviour. Set a " +
+             "compass angle (0 = north, 90 = east, 180 = south) to pin the trail in one place " +
+             "so it can be walked to while testing.")]
+    public float fixedBearing = -1f;
+
     // Authority seam, as with Wallet and Expedition.
     protected virtual bool HasAuthority { get { return true; } }
 
@@ -39,6 +48,37 @@ public class Level2Site : MonoBehaviour
 
         ChooseBearing();
         SitOnGround();
+        LogBearing();
+    }
+
+    private static readonly string[] Compass =
+    {
+        "north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"
+    };
+
+    /// <summary>
+    /// Say which way the trail runs this time.
+    ///
+    /// The bearing moves every run, which is the whole point -- but it also means a tester has
+    /// no way to tell a trail that is pointing somewhere else from a trail that is broken, and
+    /// "it was there last time, same place" is the symptom of the design working. One line in
+    /// the console settles it. Same reasoning as <see cref="DarkQuarter"/>'s logChoice, which
+    /// prints its corner for exactly the same reason.
+    /// </summary>
+    private void LogBearing()
+    {
+        if (!logBearing) return;
+
+        float bearing = transform.eulerAngles.y;
+
+        // Deliberately a warning rather than a log, purely so it cannot be scrolled past in a
+        // busy console -- this exists to be read. Clear logBearing when you stop testing.
+        Debug.LogWarning(string.Format(
+            "Blood trail runs {0} from the house this run ({1:0}°); first mark about {2:0} m out. " +
+            "Buy the UV flashlight, press X, walk that way and sweep the ground.",
+            Compass[Mathf.RoundToInt(bearing / 45f) % 8], bearing,
+            transform.childCount > 0 ? Vector3.Distance(transform.position, transform.GetChild(0).position) : 0f),
+            this);
     }
 
     /// <summary>
@@ -49,6 +89,20 @@ public class Level2Site : MonoBehaviour
     private void ChooseBearing()
     {
         Physics.SyncTransforms();
+
+        // Pinned for testing. It still has to pass the same checks as a rolled one -- a fixed
+        // bearing that buries the door would be worse than a moving one, not better -- so a
+        // refusal falls through to the roll rather than pretending it worked.
+        if (fixedBearing >= 0f)
+        {
+            transform.rotation = Quaternion.Euler(0f, fixedBearing, 0f);
+            Physics.SyncTransforms();
+
+            if (door == null || BearingClear()) return;
+
+            Debug.LogWarning("Level2Site: fixedBearing " + fixedBearing.ToString("0") +
+                             "° is blocked, rolling instead.", this);
+        }
 
         for (int i = 0; i < Mathf.Max(1, attempts); i++)
         {

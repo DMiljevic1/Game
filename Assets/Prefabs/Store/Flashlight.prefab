@@ -561,11 +561,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a9019513eb991f146a6ad04fb9a9a4b4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Flashlight
-  itemName: torch
+  itemName: flashlight
   pickUpKey: 102
   carryMoveMultiplier: 1
   carrySprintMultiplier: 1
   allowSprintWhileCarried: 1
+  heavyLoad: 0
   canBeStoredInInventory: 1
   heldPosition: {x: 0.1, y: -0.1, z: 0.15}
   heldEuler: {x: 2.72831, y: 19.820587, z: 352.47675}

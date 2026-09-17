@@ -60,7 +60,7 @@ public static class PrototypeEnvironmentBuilder
 
     static Material grass, dirt, wallExt, wallInt, floorWood, roofMat, wood, plank,
                     fabric, metalDark, metalPale, glass, bark, foliage, foliageAlt,
-                    rockMat, bushMat, lampWarm, lampDead, ceramic, paint, caveFloor;
+                    rockMat, bushMat, lampWarm, lampDead, ceramic, paint, caveFloor, blood;
 
     // Trunk positions, so props and the path can avoid growing inside a tree.
     static readonly List<Vector2> occupied = new List<Vector2>();
@@ -378,6 +378,20 @@ public static class PrototypeEnvironmentBuilder
         lampDead   = Mat("Light_DeadBulb",  new Color(0.180f, 0.180f, 0.170f), 0.60f, 0f, Color.black);
         // Pale, so Tom's trail marks and paper read in a flashlight beam against near-black bark.
         paint      = Mat("Env_Paint",       new Color(0.420f, 0.410f, 0.370f), 0.10f, 0f, Color.black);
+        // Dried blood, and it EMITS. Every UV mark in the level used to be Env_Paint: a dull
+        // grey lit by 45 lumens of violet at the far end of the beam, which on a near-black
+        // night is invisible even when the reveal is working perfectly. The marks were never
+        // the problem -- finding one bought you nothing you could actually see. Emission is
+        // what makes a revealed mark read as fluorescing instead of as one more grey shape in
+        // the dark, and it costs nothing while hidden, because UVRevealed switches the
+        // renderer off and not the material.
+        //
+        // The value is high because these are thin flat decals on unlit ground competing with
+        // a tonemapper that has nothing bright to key off -- measured against captures, 1.7
+        // was still only a dark maroon smudge. Compare it with Light_WarmBulb (3.2) rather
+        // than reading it as a colour.
+        blood      = Mat("Env_Blood",       new Color(0.180f, 0.020f, 0.025f), 0.35f, 0f,
+                                            new Color(5.20f, 0.230f, 0.400f));
         AssetDatabase.SaveAssets();
     }
 
@@ -1431,10 +1445,13 @@ public static class PrototypeEnvironmentBuilder
 
                 // Left, right, left: a walk, not a dotted line.
                 float side = (n % 2 == 0 ? -0.24f : 0.24f);
+                // The same blood as the trail outside, and emissive for the same reason: a
+                // dull grey sole under a violet lamp in a pitch-dark cave was invisible even
+                // when the reveal was working.
                 Prim(foot, "Sole", PrimitiveType.Cube, new Vector3(side, 0f, 0.04f),
-                     new Vector3(0.09f, 0.012f, 0.17f), paint, default(Vector3), false);
+                     new Vector3(0.09f, 0.012f, 0.17f), blood, default(Vector3), false);
                 Prim(foot, "Heel", PrimitiveType.Cube, new Vector3(side, 0f, -0.09f),
-                     new Vector3(0.075f, 0.012f, 0.07f), paint, default(Vector3), false);
+                     new Vector3(0.075f, 0.012f, 0.07f), blood, default(Vector3), false);
 
                 foot.gameObject.AddComponent<UVRevealed>();
             }
@@ -1849,15 +1866,15 @@ public static class PrototypeEnvironmentBuilder
 
     // ------------------------------------------------------- the way to level 2
     /// <summary>
-    /// The UV trail and what it leads to: a line of footprints running out from the near
-    /// woods to a mark at the edge of the map, and the door that mark hides.
+    /// The blood trail and what it leads to: somebody bled their way out of the yard and into
+    /// the woods, and the pool where they stopped is where the door is.
     ///
     /// Everything here is laid out along local **+z** and the root sits at the house, because
     /// <see cref="Level2Site"/> swings the whole thing onto a random bearing at run time --
     /// so the direction you must walk changes every run while the shape stays as authored.
     ///
-    /// The footprints and the circle are render-only and carry <see cref="UVRevealed"/>: they
-    /// do not exist to the eye, to a normal flashlight or to the NavMesh. Only the door gets
+    /// The drops and the pool are render-only and carry <see cref="UVRevealed"/>: they do not
+    /// exist to the eye, to a normal flashlight or to the NavMesh. Only the door gets
     /// colliders, and those are off until the powder is scattered.
     /// </summary>
     static void BuildLevel2Site(Transform props)
@@ -1871,74 +1888,126 @@ public static class PrototypeEnvironmentBuilder
         // Same rule every carryable follows.
         root.gameObject.AddComponent<NavMeshModifier>().ignoreFromBuild = true;
 
-        // Starts well out in the woods, not at the door: the player has to already be
-        // exploring with the flashlight on before there is anything to find.
-        const float first = 40f;
+        // It starts at the edge of the yard, not forty metres out in the trees.
+        //
+        // Forty was the old rule -- "you have to already be exploring before there is anything
+        // to find" -- and it did not survive contact: a half-metre-wide line somewhere on a
+        // 250 m circle, hunted with an 18 m lamp at night, is not exploration, it is a
+        // lottery. A trail whose first drop is in the yard loses nothing, because the trail was
+        // never the content; FOLLOWING it for seventy metres into the dark is. So the lamp is
+        // what you buy to pick it up outside the door, and the woods are still where it goes.
+        //
+        // It reads as what it is, too: somebody bled in the yard and got as far as the woods.
+        const float first = 12f;
         const float last = 84f;
-        const float step = 2.6f;
-        const float circleAt = 88f;
+        const float step = 3.0f;
+        const float poolAt = 88f;
         const float doorAt = 90.5f;
 
         int n = 0;
         for (float z = first; z <= last; z += step, n++)
         {
-            // Left, right, left: a walking line rather than a dotted one.
-            float side = (n % 2 == 0 ? -1f : 1f) * 0.22f;
+            // How far along the trail this is. The bleeding gets worse the further they went,
+            // so the drops grow and multiply towards the pool -- which means a player who has
+            // found one drop can tell which way is ONWARD without being told.
+            float t = Mathf.InverseLerp(first, last, z);
 
-            Transform foot = Group(root, "Step_" + n);
-            foot.localPosition = new Vector3(side, 0.02f, z);
-            foot.localEulerAngles = new Vector3(0f, Random.Range(-9f, 9f), 0f);
+            Transform spot = Group(root, "Drip_" + n);
+            // A drunken line: they were not walking straight, and a dead-straight row of
+            // marks reads as level furniture rather than as a man.
+            spot.localPosition = new Vector3(Mathf.Sin(n * 0.9f) * 0.45f + Random.Range(-0.2f, 0.2f), 0.02f, z);
+            spot.localEulerAngles = new Vector3(0f, Random.Range(0f, 360f), 0f);
 
-            // A sole and a heel, so it reads as a footprint and not a smudge.
-            Prim(foot, "Sole", PrimitiveType.Cube, new Vector3(0f, 0f, 0.05f),
-                 new Vector3(0.11f, 0.012f, 0.20f), paint, default(Vector3), false);
-            Prim(foot, "Heel", PrimitiveType.Cube, new Vector3(0f, 0f, -0.10f),
-                 new Vector3(0.09f, 0.012f, 0.08f), paint, default(Vector3), false);
+            // **Size is what makes or breaks this, and it was measured in play, not guessed.**
+            // The first version used 0.07-0.16 and the drops came out about 6 cm across. A 6 cm
+            // mark 12 m away subtends 0.3 degrees -- five pixels at 1080p -- so a player had to
+            // be standing within two or three metres of one to see it at all, on a trail whose
+            // bearing is re-rolled every run. The reveal was working perfectly the whole time;
+            // there was simply nothing big enough to notice. Don't shrink these back.
+            int drops = 3 + Mathf.RoundToInt(t * 4f);
+            for (int i = 0; i < drops; i++)
+            {
+                float size = Random.Range(0.22f, 0.45f) * (0.8f + t * 1.2f);
 
-            foot.gameObject.AddComponent<UVRevealed>();
+                // Flattened cylinders, stretched a little and turned at random: a spatter,
+                // not a stamp. Cylinders rather than cubes so nothing reads as a tile edge.
+                Prim(spot, "Drop_" + i, PrimitiveType.Cylinder,
+                     new Vector3(Random.Range(-0.55f, 0.55f), 0f, Random.Range(-0.55f, 0.55f)),
+                     new Vector3(size, 0.006f, size * Random.Range(0.8f, 1.9f)), blood,
+                     new Vector3(0f, Random.Range(0f, 360f), 0f), false);
+            }
+
+            // Every so often it is a smear rather than drops -- they went down here and got up.
+            // These are the long shapes, and they are what you actually catch out of the corner
+            // of a sweep, so they are common rather than rare.
+            if (Random.value < 0.4f)
+            {
+                Prim(spot, "Smear", PrimitiveType.Cylinder,
+                     new Vector3(Random.Range(-0.3f, 0.3f), 0f, 0f),
+                     new Vector3(0.28f + t * 0.3f, 0.006f, 1.5f + t * 1.4f), blood,
+                     new Vector3(0f, Random.Range(-25f, 25f), 0f), false);
+            }
+
+            spot.gameObject.AddComponent<UVRevealed>();
         }
 
-        // --- the mark at the end of the trail -------------------------------
-        Transform circle = Group(root, "UVCircle");
-        circle.localPosition = new Vector3(0f, 0.02f, circleAt);
+        // --- the pool at the end of the trail -------------------------------
+        // Where they stopped. It is deliberately much bigger than anything on the way in, so
+        // arriving at it is unmistakable: the trail does not peter out, it ends in something.
+        Transform pool = Group(root, "BloodPool");
+        pool.localPosition = new Vector3(0f, 0.02f, poolAt);
 
-        Transform ring = Group(circle, "Ring");
-        const int segments = 40;
-        for (int i = 0; i < segments; i++)
+        Transform body = Group(pool, "Pool");
+        Prim(body, "Pool_Main", PrimitiveType.Cylinder, Vector3.zero,
+             new Vector3(2.9f, 0.010f, 2.6f), blood, default(Vector3), false);
+
+        // Lobes round the rim, so the edge is a spill and not a dinner plate.
+        for (int i = 0; i < 7; i++)
         {
-            float a = i / (float)segments * Mathf.PI * 2f;
-            Prim(ring, "Arc_" + i, PrimitiveType.Cube,
-                 new Vector3(Mathf.Cos(a) * 1.5f, 0f, Mathf.Sin(a) * 1.5f),
-                 new Vector3(0.10f, 0.012f, 0.26f), paint,
-                 new Vector3(0f, -a * Mathf.Rad2Deg, 0f), false);
+            float a = i / 7f * Mathf.PI * 2f + Random.Range(-0.3f, 0.3f);
+            float r = Random.Range(1.1f, 1.5f);
+            float size = Random.Range(0.7f, 1.3f);
+
+            Prim(body, "Lobe_" + i, PrimitiveType.Cylinder,
+                 new Vector3(Mathf.Cos(a) * r, 0f, Mathf.Sin(a) * r),
+                 new Vector3(size, 0.010f, size * Random.Range(0.7f, 1.4f)), blood,
+                 new Vector3(0f, Random.Range(0f, 360f), 0f), false);
         }
 
-        // A cross through the middle, so the circle has a centre to stand on.
-        Prim(ring, "Bar_A", PrimitiveType.Cube, Vector3.zero, new Vector3(2.0f, 0.012f, 0.09f), paint, default(Vector3), false);
-        Prim(ring, "Bar_B", PrimitiveType.Cube, Vector3.zero, new Vector3(0.09f, 0.012f, 2.0f), paint, default(Vector3), false);
+        // Cast-off: a few drops thrown clear of the pool, which is what gives it a direction.
+        for (int i = 0; i < 9; i++)
+        {
+            float a = Random.Range(0f, Mathf.PI * 2f);
+            float r = Random.Range(1.8f, 3.4f);
 
-        circle.gameObject.AddComponent<UVRevealed>();
+            Prim(body, "Cast_" + i, PrimitiveType.Cylinder,
+                 new Vector3(Mathf.Cos(a) * r, 0f, Mathf.Sin(a) * r),
+                 new Vector3(Random.Range(0.08f, 0.22f), 0.006f, Random.Range(0.10f, 0.40f)), blood,
+                 new Vector3(0f, Random.Range(0f, 360f), 0f), false);
+        }
+
+        pool.gameObject.AddComponent<UVRevealed>();
 
         // The powder left behind afterwards, so the place still reads without the flashlight.
-        Transform dust = Group(circle, "Dusting");
+        Transform dust = Group(pool, "Dusting");
         Renderer[] dusting = new Renderer[1];
         dusting[0] = Prim(dust, "Dust", PrimitiveType.Cylinder, Vector3.zero,
-                          new Vector3(3.2f, 0.008f, 3.2f), paint, default(Vector3), false).GetComponent<Renderer>();
+                          new Vector3(3.6f, 0.008f, 3.6f), paint, default(Vector3), false).GetComponent<Renderer>();
 
-        // The circle needs a collider so a pour of powder can FIND it -- it is never aimed at
-        // or prompted, because a circle that announced itself would give the door away to
+        // The pool needs a collider so a pour of powder can FIND it -- it is never aimed at
+        // or prompted, because a pool that announced itself would give the door away to
         // anyone who walked past without a UV flashlight.
         //
         // A TRIGGER, not a solid: a solid box here would be an invisible wall in the middle of
         // the woods, and the powder's overlap search passes QueryTriggerInteraction.Collide.
-        GameObject aim = new GameObject("Circle_Volume");
-        aim.transform.SetParent(circle, false);
+        GameObject aim = new GameObject("Pool_Volume");
+        aim.transform.SetParent(pool, false);
         aim.transform.localPosition = new Vector3(0f, 0.6f, 0f);
         BoxCollider aimBox = aim.AddComponent<BoxCollider>();
-        aimBox.size = new Vector3(3.0f, 1.2f, 3.0f);
+        aimBox.size = new Vector3(3.4f, 1.2f, 3.4f);
         aimBox.isTrigger = true;
 
-        RevealCircle reveal = circle.gameObject.AddComponent<RevealCircle>();
+        RevealCircle reveal = pool.gameObject.AddComponent<RevealCircle>();
         reveal.dusting = dusting;
 
         // --- the door itself ------------------------------------------------
@@ -1961,6 +2030,13 @@ public static class PrototypeEnvironmentBuilder
 
         Level2Site site = root.gameObject.AddComponent<Level2Site>();
         site.door = door;
+
+        // The trail is nearly twice as long as it was and its first few metres run through the
+        // yard, where the shed, the wreck and the lamps stand -- so a bearing losing three or
+        // four drops to a prop is now ordinary rather than a sign it is pointing into a rock.
+        // Rejecting those bearings would just narrow the roll for no gain; the drops are dense
+        // enough that a handful of gaps is not a gap in the thread.
+        site.lostMarksAllowed = 5;
     }
 
     /// <summary>
