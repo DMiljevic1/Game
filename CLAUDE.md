@@ -1116,6 +1116,11 @@ lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
 - **Money is spent only after the item is certain to have somewhere to go** (`interactor.CanPickUp`
   is checked first), so a refused pickup can never leave the player poorer with nothing to show.
   `Wallet.Add(-price)` does the paying, and `MoneyHud` already renders the negative delta.
+- **Anything bought can be sold back at the `SellStation` for `Store.resaleFraction` (0.5) of what
+  was paid.** `TryBuy` stamps a `StoreGood` on the item at purchase carrying its `resaleValue`, and
+  `SellStation` sells a `Valuable` for its value or a `StoreGood` for that. It is stamped at purchase,
+  not authored on the prefab, so the placed fuel cans — never paid for — are worth nothing. Resale is
+  always below cost, so buying and selling can never mint money.
 - **Nothing sold here can ever be found as loot.** That is not a flag: `LootSpawner` only ever
   instantiates from `lootPrefabs`, which holds `Valuable`s, and store goods are neither `Valuable`s
   nor in that list. Keep it that way — the two catalogues must not be merged.
@@ -1140,7 +1145,7 @@ lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
 | Shovel | 90 | A plain `Carryable`. No behaviour yet — the gameplay comes later |
 | Adrenaline | **500, flat** | `Adrenaline` prices itself through `IStorePriced`, reading the one price on `Revival` rather than the stock list; see *Death and revive* |
 | Fuel can | **50** | A detached copy of the scene cans (`FuelCan`, 40 fuel = 160 s). The only fuel once the four placed cans are used |
-| UV flashlight | **500** | `UVFlashlight`, a `Flashlight` subclass. Deep violet beam (24 m, 32°, 110 lm) — narrower and shorter than the plain flashlight, and the **only** way to see the blood trail or the pool |
+| UV flashlight | **200** | `UVFlashlight`, a `Flashlight` subclass. Deep violet beam (24 m, 32°, 110 lm) — narrower and shorter than the plain flashlight, and the **only** way to see the blood trail or the pool |
 | Magic powder | **200** | `MagicPowder`. **Infinite** — bought once, used forever. Left mouse tips the jar; scatter it anywhere to test for hidden things, and on the pool of blood it brings the Level 2 door into the world |
 
 - `StoreItem.CurrentPrice` is what is shown and charged, never `price` directly. A prefab that

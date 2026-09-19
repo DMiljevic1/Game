@@ -107,6 +107,10 @@ public class Store : MonoBehaviour, IInteractable
     [Tooltip("Everything for sale, in the order it is listed. Add an entry to add an item.")]
     public List<StoreItem> stock = new List<StoreItem>();
 
+    [Tooltip("Share of the price paid that the sell counter gives back for a bought item.")]
+    [Range(0f, 1f)]
+    public float resaleFraction = 0.5f;
+
     [Header("Wiring")]
     [Tooltip("Where the money comes from. Falls back to Wallet.Instance if left empty.")]
     public Wallet wallet;
@@ -344,6 +348,10 @@ public class Store : MonoBehaviour, IInteractable
             Destroy(spawned);
             return Report(StoreResult.Unavailable, "Out of stock.");
         }
+
+        // Priced from what was actually paid, so a self-pricing item resells for its real cost.
+        StoreGood good = spawned.AddComponent<StoreGood>();
+        good.resaleValue = Mathf.RoundToInt(price * resaleFraction);
 
         wallet.Add(-price);
         interactor.Carry(carryable);

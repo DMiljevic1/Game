@@ -6,8 +6,8 @@ using UnityEngine;
 ///
 /// It is an ordinary IInteractable, so PlayerInteractor does the aiming, the
 /// prompting and the key routing - exactly like the generator, which only offers
-/// refuel when you are actually holding a can. Here: no valuable in hand, no
-/// prompt at all.
+/// refuel when you are actually holding a can. Here: nothing sellable in hand (loot,
+/// or something bought at the store), no prompt at all.
 ///
 /// Co-op note: the station performs the sale and the Wallet records it. Nothing
 /// about the transaction lives in the UI, so a client showing the balance can be
@@ -51,22 +51,23 @@ public class SellStation : MonoBehaviour, IInteractable
 
     public void GetOptions(PlayerInteractor interactor, List<InteractionOption> options)
     {
-        Valuable item = interactor.GetCarried<Valuable>();
+        int price;
+        Carryable item = Sellable(interactor, out price);
         if (item == null) return;   // nothing worth selling in hand: offer nothing
 
-        options.Add(new InteractionOption(sellKey, string.Format("Sell {0} (${1:N0})", item.itemName, item.value)));
+        options.Add(new InteractionOption(sellKey, string.Format("Sell {0} (${1:N0})", item.itemName, price)));
     }
 
     public void Interact(PlayerInteractor interactor, KeyCode key)
     {
         if (key != sellKey) return;
 
-        Valuable item = interactor.GetCarried<Valuable>();
+        int paid;
+        Carryable item = Sellable(interactor, out paid);
         if (item == null) return;
 
-        // Read the price before the item goes away.
+        // Read the name before the item goes away.
         string soldName = item.itemName;
-        int paid = item.value;
 
         // Out of the hands without being dropped on the floor, then out of the world.
         interactor.ConsumeCarried();
@@ -81,6 +82,30 @@ public class SellStation : MonoBehaviour, IInteractable
     void Update()
     {
         ApplyFlash();
+    }
+
+    /// <summary>
+    /// What is in hand and what it fetches, or null. Loot sells for its value; anything
+    /// bought at the store sells back for the share of its price the store stamped on it.
+    /// </summary>
+    private static Carryable Sellable(PlayerInteractor interactor, out int price)
+    {
+        price = 0;
+        Carryable item = interactor.GetCarried<Carryable>();
+        if (item == null) return null;
+
+        Valuable valuable = item as Valuable;
+        if (valuable != null)
+        {
+            price = valuable.value;
+            return item;
+        }
+
+        StoreGood good = item.GetComponent<StoreGood>();
+        if (good == null) return null;
+
+        price = good.resaleValue;
+        return item;
     }
 
     private void ApplyFlash()
