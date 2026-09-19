@@ -2,35 +2,19 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// What a revive costs, as a list you can edit. Index 0 is the first revive of the run.
-/// Past the end of the list the last price keeps growing, so a team that dies a lot
-/// never gets a free one.
+/// What a revive costs: one flat price, the same every time. Deliberately not a curve --
+/// a price that climbs with every death punishes the run that is already going badly, and
+/// the question a revive should pose is "is it worth $500 and the walk out there", never
+/// "can we still afford one". Retune the single number; nothing else holds a price.
 /// </summary>
 [System.Serializable]
 public class RevivePricing
 {
-    [Tooltip("Price of the 1st, 2nd, 3rd... revive in a run. Retune here; nothing else holds a price.")]
-    public int[] prices = { 500, 750, 1100, 1500 };
+    [Tooltip("What every revive costs. Flat by design -- the same for the first of the run and the tenth.")]
+    public int price = 500;
 
-    [Tooltip("Past the end of the list, each revive costs this many times the one before.")]
-    public float growthPastList = 1.35f;
-
-    [Tooltip("Prices past the list are rounded to this, so they read like prices.")]
-    public int roundTo = 50;
-
-    /// <summary>The price of revive number <paramref name="index"/> (0 = the first).</summary>
-    public int PriceFor(int index)
-    {
-        if (prices == null || prices.Length == 0) return 0;
-        if (index < 0) index = 0;
-        if (index < prices.Length) return prices[index];
-
-        float price = prices[prices.Length - 1];
-        for (int i = prices.Length; i <= index; i++) price *= growthPastList;
-
-        int step = Mathf.Max(1, roundTo);
-        return Mathf.RoundToInt(price / step) * step;
-    }
+    /// <summary>What a revive costs. The same answer however many have been used.</summary>
+    public int Price { get { return Mathf.Max(0, price); } }
 }
 
 /// <summary>
@@ -66,19 +50,11 @@ public class Revival : MonoBehaviour
     [Header("Price")]
     public RevivePricing pricing = new RevivePricing();
 
-    [Tooltip("Count doses bought but not yet used towards the price. Without this a team " +
-             "could buy four at the first-revive price before anyone had died.")]
-    public bool priceIncludesUnspentAdrenaline = true;
-
     [Header("Bodies")]
     [Tooltip("Left where a player dies. Must carry a PlayerBody.")]
     public PlayerBody bodyPrefab;
 
     [Header("Revive")]
-    [Tooltip("Health a revived player comes back with, as a fraction of their maximum. " +
-             "The house regenerates the rest, since that is where a revive happens.")]
-    [Range(0.05f, 1f)] public float reviveHealthFraction = 0.5f;
-
     [Tooltip("Seconds of standing over the body. The same everywhere -- there is no faster " +
              "revive at home; the generator's radius buys safety, not speed.")]
     public float reviveSeconds = 5.5f;
@@ -130,18 +106,8 @@ public class Revival : MonoBehaviour
     // Authority seam, as with Wallet, Store and RunState.
     protected virtual bool HasAuthority { get { return true; } }
 
-    /// <summary>What the next Adrenaline costs. The store shows and charges exactly this.</summary>
-    public int NextRevivePrice { get { return pricing.PriceFor(PriceIndex); } }
-
-    /// <summary>Which revive the next dose will pay for, counting from 0.</summary>
-    public int PriceIndex
-    {
-        get
-        {
-            int used = runState != null ? runState.RevivesUsed : 0;
-            return used + (priceIncludesUnspentAdrenaline ? Adrenaline.UnspentCount : 0);
-        }
-    }
+    /// <summary>What an Adrenaline costs. The store shows and charges exactly this, every time.</summary>
+    public int NextRevivePrice { get { return pricing.Price; } }
 
     void Awake()
     {
@@ -273,8 +239,8 @@ public class Revival : MonoBehaviour
 
     /// <summary>
     /// Spend the rescuer's Adrenaline on a body and stand its owner up where it lay.
-    /// The price was paid at the store; this is where the revive is counted, which is what
-    /// makes the next dose dearer.
+    /// The price was paid at the store; this is where the revive is counted, for the run's
+    /// own tally -- the price is flat, so it does not change what the next dose costs.
     /// </summary>
     public bool TryRevive(PlayerBody body, PlayerInteractor rescuer)
     {
@@ -406,7 +372,7 @@ public class Revival : MonoBehaviour
 
         if (runState != null) runState.RecordRevive();
 
-        patient.ReviveAt(where, yaw, reviveHealthFraction);
+        patient.ReviveAt(where, yaw);
         OnRevived(patient);
     }
 
@@ -423,13 +389,5 @@ public class Revival : MonoBehaviour
                          new Color(1f, 0.55f, 0.4f));
             break;
         }
-    }
-
-    [ContextMenu("Log revive prices")]
-    private void LogPrices()
-    {
-        var line = new System.Text.StringBuilder("Revive prices this run: ");
-        for (int i = 0; i < 8; i++) line.Append(i == 0 ? "" : ", ").Append("#").Append(i + 1).Append(" $").Append(pricing.PriceFor(i));
-        Debug.Log(line.ToString(), this);
     }
 }

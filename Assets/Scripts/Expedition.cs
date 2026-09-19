@@ -66,6 +66,15 @@ public class Expedition : MonoBehaviour
              "every other test and is somewhere no player can ever stand.")]
     public string mountainRootName = "Mountain";
 
+    [Tooltip("How many of the pieces are hidden inside the cave instead of out in the woods. " +
+             "One means the cave is on the critical path: the level cannot be finished without " +
+             "going in there, with the light that needs.")]
+    public int fragmentsInCave = 1;
+
+    [Tooltip("Tries at finding a spot inside the cave before falling back to the woods, so a " +
+             "level built without a mountain still puts all its pieces out.")]
+    public int caveAttempts = 300;
+
     /// <summary>Fired once, when the gate opens.</summary>
     public event System.Action OnLevelComplete = delegate { };
 
@@ -129,10 +138,22 @@ public class Expedition : MonoBehaviour
         taken.Clear();
         Vector3 centre = depthCentre != null ? depthCentre.position : Vector3.zero;
 
+        int inCave = 0;
+
         for (int i = 0; i < fragmentsInLevel; i++)
         {
-            Vector3 spot;
-            if (!FindSpot(centre, out spot))
+            // The first few go in the cave. Deliberately first rather than last: the cave is a
+            // much smaller space than the ring, so it should get its pick before the woods have
+            // filled the separation list.
+            bool wantCave = i < fragmentsInCave;
+
+            // Assigned up front: the compiler cannot see through the short-circuit below that
+            // one of the two searches always writes it.
+            Vector3 spot = Vector3.zero;
+            bool placed = wantCave && FindCaveSpot(out spot);
+            if (placed) inCave++;
+
+            if (!placed && !FindSpot(centre, out spot))
             {
                 Debug.LogError("Expedition could not find anywhere to hide fragment " + i +
                                "; the gate cannot be opened. Loosen minSeparation or the distance band.", this);
@@ -162,7 +183,108 @@ public class Expedition : MonoBehaviour
             Vector3 d = taken[i] - centre; d.y = 0f;
             line.Append(i == 0 ? " " : ", ").Append(d.magnitude.ToString("0")).Append(" m out");
         }
+        line.Append(inCave > 0 ? "  (" + inCave + " in the cave)" : "  (none in the cave)");
         Debug.Log(line.ToString(), this);
+    }
+
+    /// <summary>
+    /// One spot on the cave floor, or false if there is no cave in this level.
+    ///
+    /// It samples <see cref="MountainInterior"/>'s volumes rather than the carve skeleton,
+    /// because those boxes are already the single description of where the cave is and are
+    /// rebuilt with the rock -- so this can never come to disagree with the shape of the
+    /// passages. A volume is picked in proportion to its floor area, or the little chambers
+    /// would see as many pieces as the long galleries.
+    ///
+    /// The floor under there is the ground cube, not the mountain: the gravel is render-only.
+    /// So the ordinary surface test still applies, and only the "never inside the cave" rule
+    /// is inverted.
+    /// </summary>
+    private bool FindCaveSpot(out Vector3 spot)
+    {
+        spot = Vector3.zero;
+
+        MountainInterior cave = MountainInterior.Instance;
+        if (cave == null || cave.volumes == null || cave.volumes.Length == 0) return false;
+
+        // Total floor area, so the draw is even across the cave rather than even across boxes.
+        float total = 0f;
+        for (int i = 0; i < cave.volumes.Length; i++)
+        {
+            if (cave.volumes[i] == null) continue;
+            Vector3 s = cave.volumes[i].lossyScale;
+            total += Mathf.Abs(s.x) * Mathf.Abs(s.z);
+        }
+        if (total <= 0f) return false;
+
+        for (int attempt = 0; attempt < Mathf.Max(1, caveAttempts); attempt++)
+        {
+            Transform volume = PickVolume(cave, total);
+            if (volume == null) continue;
+
+            // Well inside the box, not out at its lip. The volumes deliberately overrun each
+            // passage by MountainInterior.softness at both ends so consecutive ones overlap,
+            // which means their outer edges are buried in solid rock -- sampling the full
+            // footprint puts pieces inside the mountain. Measured: a spot at the lip had no
+            // ceiling above it at all and no room for a player capsule.
+            Vector3 local = new Vector3(Random.Range(-0.32f, 0.32f), 0.45f, Random.Range(-0.32f, 0.32f));
+            Vector3 candidate = volume.TransformPoint(local);
+
+            if (TooCloseToAnother(candidate)) continue;
+
+            Vector3 surface;
+            if (!Ground(candidate, true, out surface)) continue;
+            if (!StandableInCave(cave, surface)) continue;
+            if (TooCloseToAnother(surface)) continue;
+
+            spot = surface + Vector3.up * dropClearance;
+            return true;
+        }
+
+        Debug.LogWarning("Expedition wanted a fragment in the cave and could not place one; " +
+                         "it goes in the woods instead.", this);
+        return false;
+    }
+
+    /// <summary>
+    /// Is this a place inside the cave a player could actually walk to and pick something up?
+    ///
+    /// "Inside a volume" is not enough on its own, and checking only that is what buried the
+    /// first attempt in rock. Three things have to be true, and each one caught a real failure:
+    ///
+    ///   * **Well inside, not in the fade.** The volumes overrun their passages, so the edge of
+    ///     one is solid stone.
+    ///   * **Rock overhead.** A spot with open sky above it is not in the cave whatever the
+    ///     volume says -- that is how the first one came out with 99 m of headroom.
+    ///   * **Room to stand.** A player-sized capsule has to fit, or the piece is visible down a
+    ///     crack and unreachable, which is worse than not being there.
+    /// </summary>
+    private bool StandableInCave(MountainInterior cave, Vector3 surface)
+    {
+        if (cave.Weight(surface + Vector3.up * 1.2f) < 0.95f) return false;
+
+        RaycastHit up;
+        if (!Physics.Raycast(surface + Vector3.up * 0.1f, Vector3.up, out up, 12f, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return false;                       // open sky: not under the mountain at all
+        }
+        if (up.distance < 1.9f) return false;   // too low to stand under
+
+        return !Physics.CheckCapsule(surface + Vector3.up * 0.45f, surface + Vector3.up * 1.55f,
+                                     0.38f, ~0, QueryTriggerInteraction.Ignore);
+    }
+
+    private Transform PickVolume(MountainInterior cave, float totalArea)
+    {
+        float pick = Random.Range(0f, totalArea);
+        for (int i = 0; i < cave.volumes.Length; i++)
+        {
+            if (cave.volumes[i] == null) continue;
+            Vector3 s = cave.volumes[i].lossyScale;
+            pick -= Mathf.Abs(s.x) * Mathf.Abs(s.z);
+            if (pick <= 0f) return cave.volumes[i];
+        }
+        return null;
     }
 
     /// <summary>
@@ -184,7 +306,7 @@ public class Expedition : MonoBehaviour
             if (TooCloseToAnother(candidate)) continue;
 
             Vector3 surface;
-            if (!Ground(candidate, out surface)) continue;
+            if (!Ground(candidate, false, out surface)) continue;
             if (TooCloseToAnother(surface)) continue;
 
             spot = surface + Vector3.up * dropClearance;
@@ -214,30 +336,42 @@ public class Expedition : MonoBehaviour
     /// the ray alone would happily bury a fragment in a tree. Same reasoning as
     /// LootSpawner.TryResolveSurface.
     /// </summary>
-    private bool Ground(Vector3 candidate, out Vector3 surface)
+    private bool Ground(Vector3 candidate, bool wantCave, out Vector3 surface)
     {
         surface = candidate;
 
+        // Where the probe starts matters, and it is not the same question in the two places.
+        //
+        // Out in the woods the ray drops from high above, so it finds the canopy-free floor.
+        // Inside the cave that is exactly wrong: probeHeight above a passage is *above the
+        // mountain*, and the ray lands on its roof under 11-37 m of rock. Measured before this
+        // was fixed: 1990 of 2000 cave samples hit the roof. So in the cave the ray starts at
+        // the sample point itself, which is already inside the passage.
+        float start = wantCave ? 0f : probeHeight;
+        float reach = wantCave ? 16f : probeHeight * 2f;
+
         RaycastHit hit;
-        if (!Physics.Raycast(candidate + Vector3.up * probeHeight, Vector3.down, out hit,
-                             probeHeight * 2f, ~0, QueryTriggerInteraction.Ignore))
+        if (!Physics.Raycast(candidate + Vector3.up * start, Vector3.down, out hit,
+                             reach, ~0, QueryTriggerInteraction.Ignore))
         {
             return false;
         }
 
         if (Vector3.Angle(hit.normal, Vector3.up) > maxSurfaceSlope) return false;
 
-        // Never on the mountain, and never inside it.
-        //
-        // The top of the rock is flat and passes every test above while being somewhere no
-        // player can ever stand, so a piece hidden there would simply never be found. The cave
-        // under it is the opposite problem: perfectly reachable, but it is the level's optional
-        // place -- dangerous, pitch dark, and behind a bought flashlight. A key fragment in
-        // there would quietly make all of that compulsory, which is not what it is for.
+        // Never *on* the mountain, wherever we are aiming. The top of the rock is flat and
+        // passes every test above while being somewhere no player can ever stand, so a piece
+        // up there would simply never be found. Inside the cave the floor is the ground cube
+        // -- the gravel is render-only -- so this rejects ledges without rejecting the cave.
         if (hit.transform.root.name == mountainRootName) return false;
 
+        // Inside the cave, or out of it. One piece is now deliberately hidden in there, which
+        // puts the cave on the critical path: it used to be refused outright precisely so the
+        // level's optional place stayed optional, and that is the trade being made. Everything
+        // else still keeps out, so the other three are always findable without going under.
         MountainInterior cave = MountainInterior.Instance;
-        if (cave != null && cave.Contains(hit.point + Vector3.up * 1.2f)) return false;
+        bool underRock = cave != null && cave.Contains(hit.point + Vector3.up * 1.2f);
+        if (underRock != wantCave) return false;
 
         Vector3 box = fitProbeSize * 0.5f;
         if (Physics.CheckBox(hit.point + Vector3.up * (box.y + 0.05f), box,

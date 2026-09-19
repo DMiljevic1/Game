@@ -1,12 +1,15 @@
 using UnityEngine;
 
 /// <summary>
-/// Turns a hit into something the player can feel: a red edge flash, a short camera
-/// knock and an impact sound. It is a pure *observer* of <see cref="PlayerVitals"/> —
-/// it subscribes to OnDamaged and never touches health, so deleting it costs the
-/// feedback and never the damage.
+/// Turns being killed into something the player can feel: a red edge flash, a short
+/// camera knock and an impact sound. It is a pure *observer* of <see cref="PlayerVitals"/> —
+/// it subscribes to OnDied and never decides anything, so deleting it costs the
+/// feedback and never the death.
 ///
-/// No coroutines: the flash is one float ticked down in Update, so any number of hits
+/// There is no health any more, so there is nothing to scale against: a monster reaching
+/// you is always the same event, and it always plays at full strength.
+///
+/// No coroutines: the flash is one float ticked down in Update, so any number of calls
 /// in quick succession can only ever retrigger the same effect rather than stacking
 /// several of them on top of each other.
 /// </summary>
@@ -41,12 +44,6 @@ public class DamageFeedback : MonoBehaviour
     [Tooltip("Random pitch spread, so repeated hits do not machine-gun the same sample.")]
     [Range(0f, 0.5f)] public float pitchVariation = 0.12f;
 
-    [Header("Scaling")]
-    [Tooltip("Damage that produces the full effect. Smaller hits are proportionally softer; bigger ones are clamped here.")]
-    public float damageForFullEffect = 25f;
-    [Tooltip("Weakest a hit is allowed to feel, however small it was.")]
-    [Range(0f, 1f)] public float minimumIntensity = 0.5f;
-
     /// <summary>Current opacity of the flash, 0 when it is over. Read-only: a future
     /// full-screen shader could drive itself from this instead of the IMGUI overlay.</summary>
     public float FlashAlpha { get { return CurrentFlashAlpha(); } }
@@ -62,7 +59,7 @@ public class DamageFeedback : MonoBehaviour
         if (vitals == null) vitals = GetComponentInParent<PlayerVitals>();
         if (vitals == null)
         {
-            Debug.LogError("DamageFeedback on " + name + " found no PlayerVitals; the player will take damage with no feedback at all.", this);
+            Debug.LogError("DamageFeedback on " + name + " found no PlayerVitals; the player will be killed with no feedback at all.", this);
             return;
         }
 
@@ -83,12 +80,12 @@ public class DamageFeedback : MonoBehaviour
 
     void OnEnable()
     {
-        if (vitals != null) vitals.OnDamaged += HandleDamaged;
+        if (vitals != null) vitals.OnDied += HandleDied;
     }
 
     void OnDisable()
     {
-        if (vitals != null) vitals.OnDamaged -= HandleDamaged;
+        if (vitals != null) vitals.OnDied -= HandleDied;
         flashTimeLeft = 0f;
     }
 
@@ -97,22 +94,22 @@ public class DamageFeedback : MonoBehaviour
         if (flashTimeLeft > 0f) flashTimeLeft = Mathf.Max(0f, flashTimeLeft - Time.deltaTime);
     }
 
-    private void HandleDamaged()
+    private void HandleDied()
     {
-        float intensity = Mathf.Lerp(minimumIntensity, 1f, Intensity01(vitals.LastDamageAmount));
-        Play(intensity);
+        Play(1f);
     }
 
     /// <summary>
     /// Runs the whole effect at <paramref name="intensity"/> (0-1). Public so a future
-    /// source of pain — a fall, a trap — can reuse it without going through PlayerVitals.
+    /// source of a knock — a near miss, a falling tree — can reuse it without going
+    /// through PlayerVitals.
     /// </summary>
     public void Play(float intensity)
     {
         intensity = Mathf.Clamp01(intensity);
 
-        // Retrigger rather than layer: a second hit mid-fade restarts at the brighter of
-        // the two, so rapid hits stay bright but never wash out to solid red.
+        // Retrigger rather than layer: a second call mid-fade restarts at the brighter of
+        // the two, so nothing can ever stack up into a solid red screen.
         flashPeak = Mathf.Max(CurrentFlashAlpha(), flashStrength * intensity);
         flashTimeLeft = flashDuration;
 
@@ -126,12 +123,6 @@ public class DamageFeedback : MonoBehaviour
             audioSource.pitch = 1f + Random.Range(-pitchVariation, pitchVariation);
             audioSource.PlayOneShot(hitSound, hitVolume * Mathf.Lerp(0.7f, 1f, intensity));
         }
-    }
-
-    private float Intensity01(float damage)
-    {
-        if (damageForFullEffect <= 0f) return 1f;
-        return Mathf.Clamp01(damage / damageForFullEffect);
     }
 
     private float CurrentFlashAlpha()

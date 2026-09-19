@@ -143,9 +143,10 @@ public class Monster : MonoBehaviour, INoiseListener
     public float maxAgitation = 6f;
 
     [Header("Attack")]
-    [Tooltip("It hurts whatever it walks into. This is touch, not sight.")]
+    [Tooltip("It kills whatever it walks into. This is touch, not sight.")]
     public float attackRange = 1.7f;
-    public float attackDamage = 25f;
+    [Tooltip("Seconds before it can kill again. There is no health, so this is not a rate of " +
+             "damage -- it only stops one lunge taking a whole co-op team at once.")]
     public float attackInterval = 1.2f;
 
     [Header("Prowling the house")]
@@ -912,8 +913,9 @@ public class Monster : MonoBehaviour, INoiseListener
     // ---------------------------------------------------------------- attack
 
     /// <summary>
-    /// Hurts whatever it is touching. Found by overlap rather than by asking where the
-    /// player is: it can only ever have got here by following a sound.
+    /// Kills whatever it is touching. Found by overlap rather than by asking where the
+    /// player is: it can only ever have got here by following a sound. There is no
+    /// health, so reaching you is the whole of it -- no hits to survive, no run back.
     /// </summary>
     private void TryAttack()
     {
@@ -927,7 +929,7 @@ public class Monster : MonoBehaviour, INoiseListener
             if (vitals == null || !vitals.IsAlive) continue;
             if (Generator.IsPointProtected(vitals.transform.position)) continue;   // untouchable in the light
 
-            vitals.TakeDamage(attackDamage);
+            vitals.Kill();
             nextAttackTime = Time.time + attackInterval;
             return;
         }

@@ -435,13 +435,34 @@ Three rules shape the draw, and each one exists to keep searching honest:
   trunk** — a downward ray that *starts* inside a collider passes straight through it and finds the
   floor beneath, so the ray alone would happily bury a fragment in a tree. Same reasoning as
   `LootSpawner.TryResolveSurface`.
-- **Never on the mountain, and never inside it.** The top of the rock is flat and passes every other
-  test while being somewhere no player can stand, so a piece up there would simply never be found;
-  the cave under it is the opposite problem — perfectly reachable, but it is the level's *optional*
-  place, dangerous, pitch dark and behind a bought flashlight, and a key fragment in there would
-  quietly make all of that compulsory. `Expedition.Ground` refuses both (`mountainRootName`, then
-  `MountainInterior.Contains`). Measured over 4,000 draws: 25% of the ring is refused as rock, ~1%
-  as cave, and 2,818 good spots remain.
+- **Never *on* the mountain — but one piece is now deliberately *inside* it.** `fragmentsInCave`
+  is **1**, so the cave is on the critical path: the level cannot be finished without going under
+  the rock, with the light that needs. **This reverses an earlier decision knowingly** — the cave
+  used to be refused outright precisely so the level's optional place stayed optional. The other
+  three still keep out, so three of the four are always findable without going in.
+  - The top of the rock is still refused for everything (`mountainRootName`): it is flat, passes
+    every other test, and is somewhere no player can stand.
+  - `Ground` takes a `wantCave` flag and the cave test is **inverted rather than dropped**
+    (`underRock != wantCave`), so "inside the cave" and "outside it" stay one rule with one
+    definition and cannot drift apart.
+  - **The probe's ray starts somewhere different in the cave, and that is the whole trick.** Out
+    in the woods it drops from `probeHeight` above; inside the cave that is *above the mountain*,
+    so it lands on the roof under 11–37 m of rock. Measured before the fix: **1990 of 2000 cave
+    samples hit the roof**, and the cave silently never got a fragment. In the cave the ray
+    starts at the sample point, which is already inside the passage.
+  - **`MountainInterior`'s volumes are sampled at ±0.32, not their full footprint.** They overrun
+    each passage by `softness` at both ends so consecutive ones overlap, which means their outer
+    edges are buried in stone. The first working version put a fragment exactly there: 99 m of
+    headroom (open sky, not cave at all) and no room for a player to stand.
+  - **`StandableInCave` is what makes it fair**: weight ≥ 0.95 (well inside, not in the fade),
+    rock overhead within 12 m and at least 1.9 m of it, and a player-sized capsule that fits. A
+    piece visible down a crack and unreachable is worse than one that is not there.
+  - A volume is drawn in proportion to its **floor area**, or the little chambers would see as
+    many pieces as the long galleries.
+  - Measured after all of it: **82.7% of cave samples are usable** (1,654 of 2,000 — 226 refused
+    by the capsule, 97 by the fade, 13 as open sky, 10 as rock), so placement cannot realistically
+    fail. It logs and falls back to the woods if it ever does, so a level built without a mountain
+    still puts all four out.
 - A fragment is pack-storable, so it costs one of the four slots — "carry this back or carry the
   radio back" is a decision made in the field, not in a menu.
 
@@ -758,7 +779,9 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
 - Balance now: chase **4.0** vs player walk **3.5** / sprint **6.0** on stamina (see *Sprint stamina*).
   Walking loses 0.5 m/s to a chasing monster; a full sprint buys ~10 m, and sprinting in bursts can
   never average faster than it. Escape is sound — get past its hearing, then walk or crouch — not
-  legs. 25 damage every 1.2s = 4 hits, ~4.8s of standing still.
+  legs. **There is no health: its touch kills outright** (`attackRange` 1.7 m), so being caught
+  is never a fight you can survive — `attackInterval` (1.2 s) is only there so one lunge cannot
+  take a whole co-op team at once. A player in a running generator's light is still untouchable.
 
 ### Sprint stamina
 
@@ -779,8 +802,6 @@ that is the whole design, not an optimisation. It hurts what it *touches*, found
 - `showDebug` (on by default) draws the hearing radius, the destination in the state's colour, the
   last heard position and a state/agitation label in the Scene view. `MonsterDebugHud` on `Systems`
   is the in-game readout. Both are pure observers — turning either off changes no behaviour.
-- `PlayerVitals` regenerates **only inside protection**, which makes the house the only place to
-  recover without saying so.
 - **Doors:** a hunting monster that meets a shut door leans on it for `doorForceTime` (1.4s) and
   then it swings open. It cannot reach a door while the generator runs — the whole house sits inside
   the radius — so "they can open doors" is really "once the light dies". `DoorInteraction.canBeForced`
@@ -882,12 +903,12 @@ source, time), an `INoiseListener` interface, and the static `Noise` bus.
 
 ### Damage feedback
 
-`DamageFeedback` on the Player and `CameraShake` on `Main Camera` are what make a hit *readable*.
-Both are **pure observers**: `DamageFeedback` subscribes to `PlayerVitals.OnDamaged` and never
-touches health, so deleting it costs the feel of the hit and never the damage. There is still
-exactly one health system — `PlayerVitals` — and one readout, `Hud.Row(3)`.
+`DamageFeedback` on the Player and `CameraShake` on `Main Camera` are what make being killed
+*readable*. Both are **pure observers**: `DamageFeedback` subscribes to `PlayerVitals.OnDied` and
+decides nothing, so deleting it costs the feel of the moment and never the death. There is still
+exactly one place a player's condition lives — `PlayerVitals` — and one readout, `Hud.Row(3)`.
 
-- **No coroutines.** The flash is a single float ticked down in `Update`, so a burst of hits can
+- **No coroutines.** The flash is a single float ticked down in `Update`, so a burst of calls can
   only ever *retrigger* the effect: the new flash starts at the brighter of the two and the timer
   restarts. Nothing stacks, nothing is left running. Do the same for anything similar.
 - The flash is a **vignette**, not a wash — red at the edges, ~7% opacity dead centre at its
@@ -905,8 +926,9 @@ exactly one health system — `PlayerVitals` — and one readout, `Hud.Row(3)`.
 - **The hit sound is deliberately unassigned.** `hitSound` is an empty `AudioClip` slot on the
   Player's `AudioSource` (2D, `playOnAwake` off); there is no placeholder. Drop a clip in and it
   plays, pitch-varied so repeated hits don't machine-gun.
-- Effect strength scales with `PlayerVitals.LastDamageAmount` against `damageForFullEffect` (25,
-  the monster's hit), floored at `minimumIntensity` — a small scratch still registers.
+- **Nothing scales it any more.** With health gone there is one event and one strength:
+  `HandleDied` calls `Play(1f)`. `Play(intensity)` stays public and graded so a future knock — a
+  near miss, a falling tree — can use it without inventing a second copy of the maths.
 
 ### Death and revive
 
@@ -915,18 +937,23 @@ home and uses **Adrenaline** on it. The pieces are deliberately separate, and ea
 
 | Concern | Owner | Where |
 |---|---|---|
-| Alive / dead, health, `ReviveAt`, `Respawn` | `PlayerVitals` | Player |
+| Alive / dead, `Kill`, `ReviveAt`, `Respawn` | `PlayerVitals` | Player |
 | Controls, avatar colliders and renderers off while dead | `PlayerDeathLock` (pure observer) | Player |
 | The body left in the world | `PlayerBody` (a `Carryable`) | `Assets/Prefabs/PlayerBody.prefab`, spawned at run time |
 | Revival item | `Adrenaline` (a `Carryable`, `IStorePriced`) | `Assets/Prefabs/Store/Adrenaline.prefab` |
-| Revive rules, the revive itself, bodies, price curve | `Revival` (authority, `RevivePricing`) | Systems |
+| Revive rules, the revive itself, bodies, the price | `Revival` (authority, `RevivePricing`) | Systems |
 | Revives used this run, who is alive, all-dead | `RunState` (authority) | Systems |
 | Whether a revive is *safe* to do | `Generator` (`IsPointProtected`) — not `Revival` | Generator |
-| What singleplayer does when everyone is dead | `SingleplayerDeathFallback` | Systems — **delete when co-op lands** |
+| Game over when everyone is dead | `RunReset` (authority) | Systems |
 
 - **`PlayerVitals` knows none of the others.** It fires `OnDied` / `OnRevived`, plus the static
   `AnyDied` / `AnyRevived` for run-level listeners, and keeps a static `All` registry of players (a
-  scene registry like `Generator`'s, not per-player state). Nothing else writes health.
+  scene registry like `Generator`'s, not per-player state). Nothing else kills a player.
+- **There is no health, and there must not be one again.** `PlayerVitals` holds one bool and
+  `Kill()` is the only way into it — no damage numbers, no regeneration, no bar. A monster that
+  reaches you has already won, which is what makes the generator, the crouch and the noise rules
+  the whole of the defence. Anything new that can kill calls `Kill()`; anything that would only
+  *hurt* does not belong in this game.
 - **The body is its own object, not the player's.** So the player object is free to become a
   spectator later, and the body is an ordinary hands-only `Carryable` (television weights:
   `heavyLoad`, so `heavyWalkSpeed`, no sprint, no jump, no pack). Carrying a teammate home is the same pick-up/put-down as anything else; a
@@ -937,18 +964,38 @@ home and uses **Adrenaline** on it. The pieces are deliberately separate, and ea
 - **The counter is global for the run and lives on `RunState`.** It resets in `Awake`, so every level
   load is a new run; `BeginRun()` exists for a new run without a reload. Only `Revival.TryRevive`
   calls `RecordRevive`, and only after a successful revive.
-- **Price = `RevivePricing.PriceFor(revivesUsed + unspent Adrenaline)`.** Counting unspent doses
-  (`priceIncludesUnspentAdrenaline`) is what stops a team buying four at $500 before anyone dies.
-  Retune the `prices` list on `Revival`; past its end each revive costs `growthPastList` × the last.
-- A revive stands the owner up at the body with `reviveHealthFraction` (0.5) — the house regenerates
-  the rest. The body and the dose are destroyed; the dose leaves `Adrenaline.UnspentCount` immediately.
+- **Price = `RevivePricing.Price`, a flat $500, every time.** It used to be a curve (500 → 750 →
+  1,100 → 1,500, counting unspent doses so a team could not stockpile at the first price), and that
+  is gone on purpose: **a price that climbs with every death punishes the run that is already going
+  badly**, and it made a second death a run-ender rather than a setback. The question a revive
+  should pose is "is it worth $500 and the walk out there", never "can we still afford one". So
+  there is now exactly one number on `Revival`, and nothing counts revives for pricing —
+  `RunState.RevivesUsed` is still kept, but only as the run's tally. Don't reintroduce an index.
+- A revive stands the owner up at the body, whole — there is no health to come back with a
+  fraction of. The body and the dose are both destroyed.
 - `PlayerDeathLock` re-disables the controls **every frame** while dead, because the store restores
   what it suspended when it closes, and dying with the store open would otherwise hand a corpse its legs back.
-- **Singleplayer:** every death is "all players dead". `SingleplayerDeathFallback` listens to
-  `RunState.OnAllPlayersDead` and after `standInDelay` (4 s) `Respawn`s the player at the house to
-  act as their own rescuer. The body stays, so fetch → buy → revive is fully playable. In co-op this
-  component is removed and `OnAllPlayersDead` becomes Game Over.
-- One body per player: a new death replaces that player's old body (only reachable in singleplayer).
+- **Everyone dead is game over, and game over reloads the level.** `RunReset` on `Systems` listens
+  to `RunState.OnAllPlayersDead`, shows `GAME OVER - restarting in Ns` for `restartDelay` (4 s),
+  then `SceneManager.LoadScene`s the active scene. Verified in play: killing the only player took
+  it from `allDead=False` to a pending reset, and after the countdown the scene came back with a
+  live player on their feet and four freshly scattered fragments.
+- **It cannot tell how many players there are, and that is the design.** `RunState` fires the event
+  from the death of whoever happens to be the last one standing — the third death of three, the
+  only death of one — so there is no player-count branch to drift out of step with co-op.
+- **It owns no state to put back, and must never grow any.** Everything a run accumulates — the
+  Wallet, `RunState`'s revive count, the generator's fuel, the loot roll, where the fragments are,
+  the blood trail's bearing, which corner is dark — is scene state rolled or reset in `Awake` /
+  `Start`. So **reloading the scene *is* the reset**, and there is deliberately no "undo the run"
+  code for that state to disagree with. It needs the scene in Build Settings (it is, index 0).
+- It restores the cursor lock before loading, because dying with the store open is possible and a
+  fresh level with a loose cursor and no mouse look is the worst thing to leave behind.
+- **Nothing else may answer `OnAllPlayersDead`.** `SingleplayerDeathFallback` still exists in
+  `Assets/Scripts/` — it stands the last dead player back up at the house as their own rescuer —
+  but it is **not in the scene and must not be added**: a respawn during the countdown would
+  cancel the reset through `RunReset`'s revived check, and you would walk back into the house and
+  find your own body on the floor.
+- One body per player: a new death replaces that player's old body.
 - **The body carries what its owner did — hands and all four slots.** `Revival.LeaveBody` calls
   `PlayerBody.TakeBelongings`, which parents each item under the body and `OnStowed`s it: the same
   deactivate a pack slot does, so it is the same GameObject with the same script, value and state,
@@ -977,8 +1024,8 @@ generator decorative — the safety *is* the reward for hauling a teammate back.
   pressure. Nothing in `Revival` implements that; it falls out of `Generator` as it already stood.
 - `Revival.IsProtectedSpot` exists **for the prompt only** (`Generator.IsPointProtected`). It changes
   no timing, no noise and no rule — if it ever gates behaviour, the design above has been broken.
-- **Every revive costs one Adrenaline**, at home or out. `RevivePricing` is untouched and money stays
-  the revive sink; the decision is *where to spend the 5.5 s*, never whether to pay.
+- **Every revive costs one Adrenaline**, at home or out, and always the same $500 — money stays the
+  revive sink; the decision is *where to spend the 5.5 s*, never whether to pay.
 - **The dose is spent the moment the needle goes in**, before the timer starts. That is what makes
   walking away a loss rather than a free look at a progress bar — and it is why the prompt says so.
 - An attempt fails if the rescuer strays past `reviveStayWithin` (3 m), dies, or presses **E** again
@@ -1091,14 +1138,15 @@ lives in the UI, the same rule `MoneyHud` and `InventoryHud` follow.
 | Flashlight | 60 | The existing `Flashlight`: beam range 32, spot 42°, intensity 70 |
 | Better Flashlight | 180 | The same script, a beam that is genuinely brighter: range **70**, spot **60°** (inner **34°**), intensity **520 lm**, whiter |
 | Shovel | 90 | A plain `Carryable`. No behaviour yet — the gameplay comes later |
-| Adrenaline | **the next revive price** (500 → 750 → 1,100 → 1,500 …) | `Adrenaline` prices itself through `IStorePriced`; see *Death and revive* |
+| Adrenaline | **500, flat** | `Adrenaline` prices itself through `IStorePriced`, reading the one price on `Revival` rather than the stock list; see *Death and revive* |
 | Fuel can | **50** | A detached copy of the scene cans (`FuelCan`, 40 fuel = 160 s). The only fuel once the four placed cans are used |
 | UV flashlight | **500** | `UVFlashlight`, a `Flashlight` subclass. Deep violet beam (24 m, 32°, 110 lm) — narrower and shorter than the plain flashlight, and the **only** way to see the blood trail or the pool |
 | Magic powder | **200** | `MagicPowder`. **Infinite** — bought once, used forever. Left mouse tips the jar; scatter it anywhere to test for hidden things, and on the pool of blood it brings the Level 2 door into the world |
 
 - `StoreItem.CurrentPrice` is what is shown and charged, never `price` directly. A prefab that
   implements `IStorePriced` works its own price out; everything else uses the listed number.
-  `TryBuy` reads the price **once, before spawning**, because Adrenaline is dearer the moment it exists.
+  `TryBuy` reads the price **once, before spawning**, so what is shown and what is charged are the
+  same number even for an item that works its own price out.
 
 - **Light intensity here is in lumens (`m_LightUnit` 1), so a wider cone is a dimmer one.** This is
   what made the better flashlight feel identical to the plain one: 160 lm spread over 58° is only
@@ -1323,7 +1371,7 @@ All placeholder HUD goes through `Hud` (`Assets/Scripts/Hud.cs`) — never raw `
 readouts, `Hud.CentrePrompt(text)` for the interaction prompt. Sizes scale with screen height.
 
 Row numbers are claimed and must not collide. **Left column** (`Hud.Row`): **0** the crouch readout
-(`PlayerMovement`, only while crouched), **1** stamina (`PlayerMovement`, only while below full), **2** Generator, **3** PlayerVitals, **4** MonsterSpawner, **5 and down** `MonsterDebugHud`
+(`PlayerMovement`, only while crouched), **1** stamina (`PlayerMovement`, only while below full), **2** Generator, **3** `PlayerVitals` (`DEAD`, or `[SAFE]` while inside the generator's light — there is no health line), **4** MonsterSpawner, **5 and down** `MonsterDebugHud`
 (last noise, then one line per monster — set its `firstRow` if you need row 5 back).
 **Right column** (`Hud.RowRight`):
 **0** money balance, **1** the `+$100` change popup, both drawn by `MoneyHud`, **2** the

@@ -101,7 +101,7 @@ public class PlayerDeathLock : MonoBehaviour
     {
         if (!locked) return;
 
-        // Behind every other readout, so the dimming never covers the health row or the
+        // Behind every other readout, so the dimming never covers the status row or the
         // singleplayer countdown.
         GUI.depth = 1;
 
